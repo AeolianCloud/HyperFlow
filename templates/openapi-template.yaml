@@ -1,0 +1,567 @@
+openapi: 3.0.3
+
+info:
+  title: API标题
+  version: 1.0.0
+  description: |
+    API描述
+
+    ## 功能特性
+    - 功能1
+    - 功能2
+    - 功能3
+
+    ## 快速开始
+    1. 获取访问令牌
+    2. 在请求头中添加Authorization
+    3. 发送API请求
+
+  contact:
+    name: API支持团队
+    email: api-support@example.com
+    url: https://support.example.com
+
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: https://api.example.com/v1
+    description: 生产环境
+  - url: https://staging-api.example.com/v1
+    description: 测试环境
+  - url: http://localhost:8080/v1
+    description: 本地开发环境
+
+tags:
+  - name: Authentication
+    description: 认证相关接口
+  - name: Users
+    description: 用户管理相关接口
+  - name: Resources
+    description: 资源管理相关接口
+
+paths:
+  /auth/login:
+    post:
+      summary: 用户登录
+      description: 使用邮箱和密码登录，获取访问令牌
+      operationId: login
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              example1:
+                summary: 基本登录
+                value:
+                  email: user@example.com
+                  password: password123
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /users:
+    get:
+      summary: 获取用户列表
+      description: 返回分页的用户列表
+      operationId: listUsers
+      tags:
+        - Users
+      parameters:
+        - $ref: '#/components/parameters/offsetParam'
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/sortParam'
+        - name: status
+          in: query
+          description: 过滤用户状态
+          schema:
+            type: string
+            enum: [active, inactive, suspended]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+      security:
+        - bearerAuth: []
+
+    post:
+      summary: 创建用户
+      description: 创建新用户账户
+      operationId: createUser
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: 创建成功
+          headers:
+            Location:
+              description: 新用户的URI
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      security:
+        - bearerAuth: []
+
+  /users/{userId}:
+    get:
+      summary: 获取用户信息
+      description: 根据用户ID获取用户详细信息
+      operationId: getUser
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: string
+        - $ref: '#/components/parameters/fieldsParam'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+    patch:
+      summary: 更新用户信息
+      description: 部分更新用户信息
+      operationId: updateUser
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+    delete:
+      summary: 删除用户
+      description: 删除指定用户
+      operationId: deleteUser
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 删除成功
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: 用户ID
+          example: 123
+        name:
+          type: string
+          description: 用户名
+          example: 张三
+        email:
+          type: string
+          format: email
+          description: 邮箱地址
+          example: zhangsan@example.com
+        phone:
+          type: string
+          description: 电话号码
+          example: "13800138000"
+          nullable: true
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          description: 用户状态
+          example: active
+        role:
+          type: string
+          enum: [admin, user, guest]
+          description: 用户角色
+          example: user
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+          example: "2024-03-19T10:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: 更新时间
+          example: "2024-03-19T10:00:00Z"
+
+    CreateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: 张三
+        email:
+          type: string
+          format: email
+          example: zhangsan@example.com
+        phone:
+          type: string
+          example: "13800138000"
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: 新名字
+        email:
+          type: string
+          format: email
+          example: newemail@example.com
+        phone:
+          type: string
+          example: "13900139000"
+
+    UserListResponse:
+      type: object
+      required:
+        - data
+        - total
+        - offset
+        - limit
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+          description: 总记录数
+          example: 156
+        offset:
+          type: integer
+          description: 偏移量
+          example: 0
+        limit:
+          type: integer
+          description: 每页数量
+          example: 20
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          example: password123
+
+    LoginResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - tokenType
+        - expiresIn
+      properties:
+        accessToken:
+          type: string
+          description: 访问令牌
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          description: 刷新令牌
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        tokenType:
+          type: string
+          description: 令牌类型
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: 访问令牌有效期（秒）
+          example: 900
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: 错误代码
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              description: 错误消息
+              example: 请求参数验证失败
+            details:
+              type: array
+              description: 错误详情
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: email
+                  message:
+                    type: string
+                    example: 邮箱格式不正确
+
+  parameters:
+    offsetParam:
+      name: offset
+      in: query
+      description: 偏移量，从0开始
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+
+    limitParam:
+      name: limit
+      in: query
+      description: 每页数量，最大100
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+    sortParam:
+      name: sort
+      in: query
+      description: |
+        排序字段，使用逗号分隔多个字段。
+        使用减号前缀表示降序。
+
+        示例：
+        - `sort=name` - 按name升序
+        - `sort=-createdAt` - 按createdAt降序
+        - `sort=status,-createdAt` - 先按status升序，再按createdAt降序
+      schema:
+        type: string
+        example: "-createdAt"
+
+    fieldsParam:
+      name: fields
+      in: query
+      description: |
+        指定返回的字段，使用逗号分隔。
+
+        示例：
+        - `fields=id,name,email`
+      schema:
+        type: string
+        example: "id,name,email"
+
+  responses:
+    Unauthorized:
+      description: 未认证
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: 未提供认证令牌
+
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FORBIDDEN
+              message: 您没有权限访问此资源
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: 资源不存在
+
+    ValidationError:
+      description: 参数验证失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: 请求参数验证失败
+              details:
+                - field: email
+                  message: 邮箱格式不正确
+
+    Conflict:
+      description: 资源冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: CONFLICT
+              message: 该邮箱已被注册
+
+    RateLimitExceeded:
+      description: 请求频率超限
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: 限流上限
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: 剩余请求数
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: 重置时间戳
+        Retry-After:
+          schema:
+            type: integer
+          description: 重试等待秒数
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMIT_EXCEEDED
+              message: 请求过于频繁，请60秒后再试
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        使用JWT Bearer Token认证。
+
+        在Authorization请求头中提供token：
+        ```
+        Authorization: Bearer <token>
+        ```
+
+        获取token：
+        1. 调用 POST /auth/login
+        2. 复制返回的accessToken
+        3. 在后续请求中使用
+
+security:
+  - bearerAuth: []
