@@ -1,0 +1,252 @@
+basePath: /api/pve
+host: localhost:8080
+info:
+  contact: {}
+  description: Hyperflow PVE 管理接口
+  title: Hyperflow API
+  version: "1.0"
+paths:
+  /nodes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 列出所有节点
+      tags:
+      - nodes
+  /nodes/{node}:
+    get:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 获取指定节点信息
+      tags:
+      - nodes
+  /nodes/{node}/vms:
+    get:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 列出节点上所有虚拟机
+      tags:
+      - vms
+  /nodes/{node}/vms/{vmid}:
+    delete:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      - description: 虚拟机 ID
+        in: path
+        name: vmid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 删除虚拟机
+      tags:
+      - vms
+    get:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      - description: 虚拟机 ID
+        in: path
+        name: vmid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 获取指定虚拟机信息
+      tags:
+      - vms
+  /nodes/{node}/vms/{vmid}/start:
+    post:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      - description: 虚拟机 ID
+        in: path
+        name: vmid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 启动虚拟机
+      tags:
+      - vms
+  /nodes/{node}/vms/{vmid}/stop:
+    post:
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      - description: 虚拟机 ID
+        in: path
+        name: vmid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 停止虚拟机
+      tags:
+      - vms
+  /storage:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 列出所有存储
+      tags:
+      - storage
+swagger: "2.0"
