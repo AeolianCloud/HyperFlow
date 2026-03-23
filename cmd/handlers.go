@@ -201,12 +201,15 @@ func deleteVm(c *gin.Context) {
 
 // createVm godoc
 // @Summary      新建虚拟机并导入磁盘
-// @Description  通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。成功后响应 Location 头指向新虚拟机资源路径。
+// @Description  通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。
+// @Description  支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
+// @Description  当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
+// @Description  成功后响应 Location 头指向新虚拟机资源路径。
 // @Tags         vms
 // @Accept       json
 // @Produce      json
 // @Param        node  path      string               true  "节点名称"
-// @Param        body  body      pve.CreateVmRequest  true  "创建参数"
+// @Param        body  body      pve.CreateVmRequest  true  "创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit 字段均为可选）"
 // @Success      202   {object}  map[string]any
 // @Failure      400   {object}  map[string]string
 // @Failure      404   {object}  map[string]string

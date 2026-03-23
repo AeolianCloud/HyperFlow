@@ -153,7 +153,7 @@
                 }
             },
             "post": {
-                "description": "通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。成功后响应 Location 头指向新虚拟机资源路径。",
+                "description": "通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。\n支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；\n当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。\n成功后响应 Location 头指向新虚拟机资源路径。",
                 "consumes": [
                     "application/json"
                 ],
@@ -173,7 +173,7 @@
                         "required": true
                     },
                     {
-                        "description": "创建参数",
+                        "description": "创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit 字段均为可选）",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -536,6 +536,16 @@
         "pve.CreateVmRequest": {
             "type": "object",
             "properties": {
+                "ciPassword": {
+                    "description": "CloudInit 登录密码（可选）",
+                    "type": "string",
+                    "example": "secret"
+                },
+                "ciUser": {
+                    "description": "CloudInit 配置（可选，使用云镜像时配置首次启动参数）",
+                    "type": "string",
+                    "example": "ubuntu"
+                },
                 "cores": {
                     "description": "CPU 核数（必填）",
                     "type": "integer",
@@ -556,6 +566,11 @@
                     "type": "string",
                     "example": "local:import/noble-server-cloudimg-amd64.img.raw"
                 },
+                "ipConfig0": {
+                    "description": "CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）",
+                    "type": "string",
+                    "example": "ip=192.168.1.100/24,gw=192.168.1.1"
+                },
                 "memory": {
                     "description": "内存大小，单位 MB（必填）",
                     "type": "integer",
@@ -565,6 +580,21 @@
                     "description": "虚拟机名称（必填）",
                     "type": "string",
                     "example": "my-vm"
+                },
+                "nameserver": {
+                    "description": "CloudInit DNS 服务器地址（可选）",
+                    "type": "string",
+                    "example": "8.8.8.8"
+                },
+                "searchDomain": {
+                    "description": "CloudInit DNS 搜索域（可选）",
+                    "type": "string",
+                    "example": "example.com"
+                },
+                "sshKeys": {
+                    "description": "CloudInit SSH 公钥，多个公钥用换行分隔（可选）",
+                    "type": "string",
+                    "example": "ssh-rsa AAAA..."
                 },
                 "storage": {
                     "description": "目标存储池（必填）",
