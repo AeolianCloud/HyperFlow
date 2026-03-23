@@ -1,10 +1,12 @@
 package pve
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -128,4 +130,41 @@ func (c *Client) PutWithBody(path string, body io.Reader) (json.RawMessage, erro
 
 func (c *Client) Delete(path string) (json.RawMessage, error) {
 	return c.do(http.MethodDelete, path, nil)
+}
+
+// UploadMultipart 向 PVE 上传 multipart/form-data 文件（用于 Snippets 等存储内容）
+func (c *Client) UploadMultipart(path string, fields map[string]string, fileField, filename string, fileData []byte) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		_ = w.WriteField(k, v)
+	}
+	fw, err := w.CreateFormFile(fileField, filename)
+	if err != nil {
+		return nil, err
+	}
+	_, err = fw.Write(fileData)
+	if err != nil {
+		return nil, err
+	}
+	w.Close()
+
+	url := c.baseURL + path
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &PveError{StatusCode: 502, Message: err.Error()}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &PveError{StatusCode: resp.StatusCode, Message: string(body)}
+	}
+	return body, nil
 }
