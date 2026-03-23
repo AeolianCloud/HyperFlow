@@ -105,3 +105,4 @@ When in explore mode (`/opsx:explore`):
 - 严格按照定义实现API
 - RESTful Web API 设计的最佳做法(https://learn.microsoft.com/zh-cn/azure/architecture/best-practices/api-design)
 - Web API 实现(https://learn.microsoft.com/zh-cn/azure/architecture/best-practices/api-implementation)
+- 每次修改增加或删除接口或者相关文件必须补全完整注释，不得影响swag文档阅读
