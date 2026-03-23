@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 新建虚拟机并导入磁盘
 系统 SHALL 通过调用 PVE `POST /nodes/{node}/qemu` 创建虚拟机，并在创建时通过磁盘参数的 `import-from` 字段导入指定磁盘卷，而非使用 clone API。当请求体包含任意 CloudInit 字段时，系统 SHALL 同时附加 CloudInit 驱动盘（`ide2: <storage>:cloudinit`）及对应 CloudInit 配置参数。
@@ -22,6 +22,8 @@
 #### Scenario: PVE 返回错误
 - **WHEN** PVE API 返回错误（如 VMID 已存在）
 - **THEN** 系统将 PVE 错误映射为对应 HTTP 状态码返回给客户端
+
+## ADDED Requirements
 
 ### Requirement: 创建虚拟机时支持 CloudInit 配置
 系统 SHALL 在创建虚拟机请求体中接受可选的 CloudInit 配置参数；当请求体包含至少一个 CloudInit 字段时，系统 SHALL 向 PVE 请求附加 CloudInit 驱动盘及对应配置。

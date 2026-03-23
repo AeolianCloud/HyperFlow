@@ -3,6 +3,7 @@ package pve
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 )
 
 // VM 表示 PVE 虚拟机
@@ -62,6 +63,13 @@ type CreateVmRequest struct {
 	DiskInterface string `json:"diskInterface,omitempty" example:"scsi0"`                   // 磁盘接口类型，默认 virtio0（可选）
 	DiskFormat    string `json:"diskFormat,omitempty" example:"qcow2"`                      // 源磁盘格式，如 qcow2/raw（可选）
 	Storage       string `json:"storage" example:"local-lvm"`                               // 目标存储池（必填）
+	// CloudInit 配置（可选，使用云镜像时配置首次启动参数）
+	CIUser       string `json:"ciUser,omitempty" example:"ubuntu"`                          // CloudInit 登录用户名（可选）
+	CIPassword   string `json:"ciPassword,omitempty" example:"secret"`                     // CloudInit 登录密码（可选）
+	SSHKeys      string `json:"sshKeys,omitempty" example:"ssh-rsa AAAA..."`               // CloudInit SSH 公钥，多个公钥用换行分隔（可选）
+	IPConfig0    string `json:"ipConfig0,omitempty" example:"ip=192.168.1.100/24,gw=192.168.1.1"` // CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）
+	Nameserver   string `json:"nameserver,omitempty" example:"8.8.8.8"`                    // CloudInit DNS 服务器地址（可选）
+	SearchDomain string `json:"searchDomain,omitempty" example:"example.com"`              // CloudInit DNS 搜索域（可选）
 }
 
 func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage, error) {
@@ -74,11 +82,38 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 		diskVal += ",format=" + req.DiskFormat
 	}
 	body := map[string]any{
-		"vmid":   req.VMID,
-		"name":   req.Name,
-		"cores":  req.Cores,
-		"memory": req.Memory,
+		"vmid":    req.VMID,
+		"name":    req.Name,
+		"cores":   req.Cores,
+		"memory":  req.Memory,
+		"cpu":     "host",
+		"machine": "q35",
+		"scsihw":  "virtio-scsi-single",
 		iface:    diskVal,
+	}
+	// 若包含任意 CloudInit 字段，附加 CloudInit 驱动盘及配置参数
+	hasCloudInit := req.CIUser != "" || req.CIPassword != "" || req.SSHKeys != "" ||
+		req.IPConfig0 != "" || req.Nameserver != "" || req.SearchDomain != ""
+	if hasCloudInit {
+		body["ide2"] = req.Storage + ":cloudinit"
+		if req.CIUser != "" {
+			body["ciuser"] = req.CIUser
+		}
+		if req.CIPassword != "" {
+			body["cipassword"] = req.CIPassword
+		}
+		if req.SSHKeys != "" {
+			body["sshkeys"] = url.QueryEscape(req.SSHKeys)
+		}
+		if req.IPConfig0 != "" {
+			body["ipconfig0"] = req.IPConfig0
+		}
+		if req.Nameserver != "" {
+			body["nameserver"] = req.Nameserver
+		}
+		if req.SearchDomain != "" {
+			body["searchdomain"] = req.SearchDomain
+		}
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
