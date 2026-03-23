@@ -118,6 +118,14 @@ func (c *Client) Post(path string) (json.RawMessage, error) {
 	return c.do(http.MethodPost, path, nil)
 }
 
+func (c *Client) PostWithBody(path string, body io.Reader) (json.RawMessage, error) {
+	return c.do(http.MethodPost, path, body)
+}
+
+func (c *Client) PutWithBody(path string, body io.Reader) (json.RawMessage, error) {
+	return c.do(http.MethodPut, path, body)
+}
+
 func (c *Client) Delete(path string) (json.RawMessage, error) {
 	return c.do(http.MethodDelete, path, nil)
 }

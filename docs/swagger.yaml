@@ -1,4 +1,40 @@
 basePath: /api/pve
+definitions:
+  pve.CreateVmRequest:
+    properties:
+      cores:
+        description: CPU 核数（必填）
+        example: 2
+        type: integer
+      diskFormat:
+        description: 源磁盘格式，如 qcow2/raw（可选）
+        example: qcow2
+        type: string
+      diskInterface:
+        description: 磁盘接口类型，默认 virtio0（可选）
+        example: scsi0
+        type: string
+      diskSource:
+        description: 导入磁盘来源，格式 storage:path（必填）
+        example: local:import/noble-server-cloudimg-amd64.img.raw
+        type: string
+      memory:
+        description: 内存大小，单位 MB（必填）
+        example: 2048
+        type: integer
+      name:
+        description: 虚拟机名称（必填）
+        example: my-vm
+        type: string
+      storage:
+        description: 目标存储池（必填）
+        example: local-lvm
+        type: string
+      vmid:
+        description: 新虚拟机 VMID（必填）
+        example: 200
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -8,6 +44,7 @@ info:
 paths:
   /nodes:
     get:
+      description: 返回 PVE 集群中所有节点列表
       produces:
       - application/json
       responses:
@@ -33,6 +70,7 @@ paths:
       - nodes
   /nodes/{node}:
     get:
+      description: 返回指定节点的详细状态信息
       parameters:
       - description: 节点名称
         in: path
@@ -55,6 +93,12 @@ paths:
             type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -64,6 +108,7 @@ paths:
       - nodes
   /nodes/{node}/vms:
     get:
+      description: 返回指定节点上所有 QEMU 虚拟机列表
       parameters:
       - description: 节点名称
         in: path
@@ -84,11 +129,75 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       summary: 列出节点上所有虚拟机
+      tags:
+      - vms
+    post:
+      consumes:
+      - application/json
+      description: 通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。成功后响应 Location 头指向新虚拟机资源路径。
+      parameters:
+      - description: 节点名称
+        in: path
+        name: node
+        required: true
+        type: string
+      - description: 创建参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/pve.CreateVmRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 新建虚拟机并导入磁盘
       tags:
       - vms
   /nodes/{node}/vms/{vmid}:
     delete:
+      description: 异步删除指定虚拟机，返回 PVE 任务 ID
       parameters:
       - description: 节点名称
         in: path
@@ -120,10 +229,17 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       summary: 删除虚拟机
       tags:
       - vms
     get:
+      description: 返回指定虚拟机的当前状态信息
       parameters:
       - description: 节点名称
         in: path
@@ -151,6 +267,12 @@ paths:
             type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -160,6 +282,7 @@ paths:
       - vms
   /nodes/{node}/vms/{vmid}/start:
     post:
+      description: 异步启动指定虚拟机，返回 PVE 任务 ID
       parameters:
       - description: 节点名称
         in: path
@@ -187,6 +310,12 @@ paths:
             type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -196,6 +325,7 @@ paths:
       - vms
   /nodes/{node}/vms/{vmid}/stop:
     post:
+      description: 异步停止指定虚拟机，返回 PVE 任务 ID
       parameters:
       - description: 节点名称
         in: path
@@ -227,11 +357,18 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       summary: 停止虚拟机
       tags:
       - vms
   /storage:
     get:
+      description: 返回 PVE 中所有存储资源列表
       produces:
       - application/json
       responses:
@@ -242,6 +379,12 @@ paths:
             type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
