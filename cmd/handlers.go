@@ -204,12 +204,13 @@ func deleteVm(c *gin.Context) {
 // @Description  通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。
 // @Description  支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
 // @Description  当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
+// @Description  ciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。
 // @Description  成功后响应 Location 头指向新虚拟机资源路径。
 // @Tags         vms
 // @Accept       json
 // @Produce      json
 // @Param        node  path      string               true  "节点名称"
-// @Param        body  body      pve.CreateVmRequest  true  "创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit 字段均为可选）"
+// @Param        body  body      pve.CreateVmRequest  true  "创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit 字段均为可选；ciPackages 非空时 snippetsStorage 必填）"
 // @Success      202   {object}  map[string]any
 // @Failure      400   {object}  map[string]string
 // @Failure      404   {object}  map[string]string
@@ -226,6 +227,10 @@ func createVm(c *gin.Context) {
 	}
 	if req.VMID == 0 || req.Name == "" || req.Cores == 0 || req.Memory == 0 || req.DiskSource == "" || req.Storage == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "vmid, name, cores, memory, diskSource and storage are required"})
+		return
+	}
+	if len(req.CIPackages) > 0 && req.SnippetsStorage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "snippetsStorage is required when ciPackages is specified"})
 		return
 	}
 	data, err := vmsSvcGlobal.CreateVm(node, req)

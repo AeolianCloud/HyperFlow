@@ -2,6 +2,17 @@ basePath: /api/pve
 definitions:
   pve.CreateVmRequest:
     properties:
+      aptMirror:
+        description: APT 镜像源地址，写入 cloud-init apt.primary（可选，仅 ciPackages 非空时生效）
+        example: http://mirrors.aliyun.com/ubuntu
+        type: string
+      ciPackages:
+        description: CloudInit 首次开机需安装的软件包列表（可选；非空时须同时指定 snippetsStorage）
+        example:
+        - qemu-guest-agent
+        items:
+          type: string
+        type: array
       ciPassword:
         description: CloudInit 登录密码（可选）
         example: secret
@@ -24,7 +35,7 @@ definitions:
         type: string
       diskSource:
         description: 导入磁盘来源，格式 storage:path（必填）
-        example: local:import/noble-server-cloudimg-amd64.img.raw
+        example: local:import/noble-server-cloudimg-amd64.qcow2
         type: string
       ipConfig0:
         description: CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）
@@ -42,9 +53,17 @@ definitions:
         description: CloudInit DNS 服务器地址（可选）
         example: 8.8.8.8
         type: string
+      network:
+        description: 网络设备配置，格式同 PVE net0，默认 virtio,bridge=vmbr0（可选）
+        example: virtio,bridge=vmbr0
+        type: string
       searchDomain:
         description: CloudInit DNS 搜索域（可选）
         example: example.com
+        type: string
+      snippetsStorage:
+        description: 存放 cloud-init user-data Snippet 的 PVE 存储名称（ciPackages 非空时必填）
+        example: local
         type: string
       sshKeys:
         description: CloudInit SSH 公钥，多个公钥用换行分隔（可选）
@@ -169,6 +188,7 @@ paths:
         通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。
         支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
         当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
+        ciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。
         成功后响应 Location 头指向新虚拟机资源路径。
       parameters:
       - description: 节点名称
@@ -177,7 +197,7 @@ paths:
         required: true
         type: string
       - description: 创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit
-          字段均为可选）
+          字段均为可选；ciPackages 非空时 snippetsStorage 必填）
         in: body
         name: body
         required: true
