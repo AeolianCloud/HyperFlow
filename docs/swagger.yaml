@@ -12,24 +12,6 @@ definitions:
       error:
         $ref: '#/definitions/main.ErrorDetail'
     type: object
-  main.OperationErrorBody:
-    properties:
-      code:
-        type: string
-      message:
-        type: string
-    type: object
-  main.OperationResponse:
-    properties:
-      error:
-        $ref: '#/definitions/main.OperationErrorBody'
-      id:
-        type: string
-      resourceLocation:
-        type: string
-      status:
-        type: string
-    type: object
   pve.CreateVmRequest:
     properties:
       aptMirror:
@@ -415,23 +397,21 @@ paths:
       summary: 停止虚拟机
       tags:
       - vms
-  /operations/{id}:
+  /operations/{id}/watch:
     get:
-      description: 返回指定异步操作的当前状态，遵循微软 LRO 规范。status 为 Running / Succeeded / Failed
-        之一。
+      description: 升级为 WebSocket 连接，服务端每隔 1s 推送操作状态消息。操作进入终态（Succeeded/Failed）后推送最终消息并以
+        code 1000 正常关闭连接。若操作 ID 不存在则返回 HTTP 404 拒绝升级。
       parameters:
       - description: 操作 ID
         in: path
         name: id
         required: true
         type: string
-      produces:
-      - application/json
       responses:
-        "200":
-          description: OK
+        "101":
+          description: Switching Protocols
           schema:
-            $ref: '#/definitions/main.OperationResponse'
+            type: string
         "404":
           description: Not Found
           schema:
@@ -440,7 +420,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/main.ErrorResponse'
-      summary: 查询异步操作状态
+      summary: 通过 WebSocket 订阅操作状态
       tags:
       - operations
   /storage:

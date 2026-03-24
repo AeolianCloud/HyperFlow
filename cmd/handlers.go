@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
@@ -319,18 +321,23 @@ func listStorage(c *gin.Context) {
 	respondOK(c, storages)
 }
 
-// getOperation godoc
-// @Summary      查询异步操作状态
-// @Description  返回指定异步操作的当前状态，遵循微软 LRO 规范。status 为 Running / Succeeded / Failed 之一。
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// watchOperation godoc
+// @Summary      通过 WebSocket 订阅操作状态
+// @Description  升级为 WebSocket 连接，服务端每隔 1s 推送操作状态消息。操作进入终态（Succeeded/Failed）后推送最终消息并以 code 1000 正常关闭连接。若操作 ID 不存在则返回 HTTP 404 拒绝升级。
 // @Tags         operations
-// @Produce      json
-// @Param        id  path      string  true  "操作 ID"
-// @Success      200  {object}  OperationResponse
+// @Param        id  path  string  true  "操作 ID"
+// @Success      101  {string}  string  "Switching Protocols"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
-// @Router       /operations/{id} [get]
-func getOperation(c *gin.Context) {
+// @Router       /operations/{id}/watch [get]
+func watchOperation(c *gin.Context) {
 	id := c.Param("id")
+
+	// 升级前校验操作存在性
 	op, err := operationsSvcGlobal.GetOperation(id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
@@ -340,6 +347,45 @@ func getOperation(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NotFound", "operation not found")
 		return
 	}
+
+	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	// 若操作已为终态，推送一条消息后立即关闭
+	if op.Status == "Succeeded" || op.Status == "Failed" {
+		resp := buildOperationResponse(op)
+		_ = conn.WriteJSON(resp)
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		return
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			current, err := operationsSvcGlobal.GetOperation(id)
+			if err != nil || current == nil {
+				return
+			}
+			resp := buildOperationResponse(current)
+			if err := conn.WriteJSON(resp); err != nil {
+				// 客户端已断开
+				return
+			}
+			if current.Status == "Succeeded" || current.Status == "Failed" {
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return
+			}
+		}
+	}
+}
+
+func buildOperationResponse(op *operations.Operation) OperationResponse {
 	resp := OperationResponse{
 		ID:               op.ID,
 		Status:           op.Status,
@@ -348,7 +394,7 @@ func getOperation(c *gin.Context) {
 	if op.ErrorCode != "" {
 		resp.Error = &OperationErrorBody{Code: op.ErrorCode, Message: op.ErrorMessage}
 	}
-	c.JSON(http.StatusOK, resp)
+	return resp
 }
 
 // registerNodesRoutes 注册节点路由
@@ -378,5 +424,5 @@ func registerStorageRoutes(rg *gin.RouterGroup, svc *pve.StorageService) {
 // registerOperationsRoutes 注册操作路由
 func registerOperationsRoutes(rg *gin.RouterGroup, svc *operations.Service) {
 	operationsSvcGlobal = svc
-	rg.GET("/:id", getOperation)
+	rg.GET("/:id/watch", watchOperation)
 }
