@@ -103,6 +103,8 @@ When in explore mode (`/opsx:explore`):
 
 ## API设计规范
 - 严格按照定义实现API
-- RESTful Web API 设计的最佳做法(https://learn.microsoft.com/zh-cn/azure/architecture/best-practices/api-design)
-- Web API 实现(https://learn.microsoft.com/zh-cn/azure/architecture/best-practices/api-implementation)
+- 遵循 Microsoft REST API Guidelines（https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md）
 - 每次修改增加或删除接口或者相关文件必须补全完整注释，不得影响swag文档阅读
+- 成功响应直接返回资源对象，不使用 `{"data": ...}` 包装层
+- 异步操作返回 202 + `Operation-Location` header，不直接暴露底层任务 ID
+- 错误响应统一格式：`{"error": {"code": "PascalCase", "message": "..."}}`
