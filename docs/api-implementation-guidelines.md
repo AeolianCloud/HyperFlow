@@ -29,7 +29,7 @@ API必须返回统一的错误响应格式，包含错误代码、消息和详�
 ```json
 {
   "error": {
-    "code": "ERROR_CODE",
+    "code": "PascalCase错误代码",
     "message": "人类可读的错误消息",
     "details": [
       {
@@ -45,10 +45,10 @@ API必须返回统一的错误响应格式，包含错误代码、消息和详�
 
 #### error.code（必需）
 
-错误代码，使用UPPER_SNAKE_CASE格式，用于程序化处理错误。
+错误代码，使用PascalCase格式，用于程序化处理错误。
 
 **命名规范：**
-- 使用大写字母和下划线
+- 使用大驼峰命名（PascalCase）
 - 清晰表达错误类型
 - 保持简洁
 
@@ -56,19 +56,18 @@ API必须返回统一的错误响应格式，包含错误代码、消息和详�
 
 | 错误代码 | HTTP状态码 | 说明 |
 |---------|-----------|------|
-| VALIDATION_ERROR | 400 | 请求参数验证失败 |
-| INVALID_REQUEST | 400 | 请求格式错误 |
-| UNAUTHORIZED | 401 | 未认证或认证失败 |
-| TOKEN_EXPIRED | 401 | 访问令牌已过期 |
-| FORBIDDEN | 403 | 无权限访问 |
-| NOT_FOUND | 404 | 资源不存在 |
-| METHOD_NOT_ALLOWED | 405 | HTTP方法不支持 |
-| CONFLICT | 409 | 资源冲突 |
-| DUPLICATE_RESOURCE | 409 | 资源已存在 |
-| INVALID_DATA | 422 | 数据不符合业务规则 |
-| RATE_LIMIT_EXCEEDED | 429 | 请求频率超限 |
-| INTERNAL_ERROR | 500 | 服务器内部错误 |
-| SERVICE_UNAVAILABLE | 503 | 服务不可用 |
+| ValidationError | 400 | 请求参数验证失败 |
+| BadRequest | 400 | 请求格式错误 |
+| Unauthorized | 401 | 未认证或认证失败 |
+| TokenExpired | 401 | 访问令牌已过期 |
+| Forbidden | 403 | 无权限访问 |
+| NotFound | 404 | 资源不存在 |
+| MethodNotAllowed | 405 | HTTP方法不支持 |
+| Conflict | 409 | 资源冲突/已存在 |
+| InvalidData | 422 | 数据不符合业务规则 |
+| RateLimitExceeded | 429 | 请求频率超限 |
+| InternalServerError | 500 | 服务器内部错误 |
+| ServiceUnavailable | 503 | 服务不可用 |
 
 #### error.message（必需）
 
@@ -125,7 +124,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "VALIDATION_ERROR",
+    "code": "ValidationError",
     "message": "请求参数验证失败",
     "details": [
       {
@@ -160,7 +159,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "UNAUTHORIZED",
+    "code": "Unauthorized",
     "message": "认证失败，请提供有效的访问令牌"
   }
 }
@@ -180,7 +179,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "TOKEN_EXPIRED",
+    "code": "TokenExpired",
     "message": "访问令牌已过期，请刷新令牌"
   }
 }
@@ -200,7 +199,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限删除此用户"
   }
 }
@@ -219,7 +218,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
@@ -243,7 +242,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "DUPLICATE_RESOURCE",
+    "code": "Conflict",
     "message": "该邮箱已被注册"
   }
 }
@@ -268,7 +267,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "INVALID_DATA",
+    "code": "InvalidData",
     "message": "库存不足，当前库存仅剩50件"
   }
 }
@@ -291,7 +290,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "RATE_LIMIT_EXCEEDED",
+    "code": "RateLimitExceeded",
     "message": "请求过于频繁，请60秒后再试"
   }
 }
@@ -310,7 +309,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "INTERNAL_ERROR",
+    "code": "InternalServerError",
     "message": "服务器内部错误，请稍后重试"
   }
 }
@@ -332,7 +331,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "SERVICE_UNAVAILABLE",
+    "code": "ServiceUnavailable",
     "message": "服务维护中，预计5分钟后恢复"
   }
 }
@@ -352,7 +351,7 @@ Content-Type: application/json
 ```json
 {
   "error": {
-    "code": "VALIDATION_ERROR",
+    "code": "ValidationError",
     "message": "邮箱格式不正确"
   }
 }
@@ -362,7 +361,7 @@ Content-Type: application/json
 ```json
 {
   "error": {
-    "code": "INTERNAL_ERROR",
+    "code": "InternalServerError",
     "message": "SQLException: Duplicate entry 'user@example.com' for key 'users.email'"
   }
 }
@@ -386,7 +385,7 @@ HTTP/1.1 200 OK
 HTTP/1.1 404 Not Found
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
@@ -405,7 +404,7 @@ Accept-Language: en-US
 ```json
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "User not found"
   }
 }
@@ -427,7 +426,7 @@ java.lang.NullPointerException: User object is null
 ```json
 {
   "error": {
-    "code": "INTERNAL_ERROR",
+    "code": "InternalServerError",
     "message": "服务器内部错误，请稍后重试"
   }
 }
@@ -440,7 +439,7 @@ java.lang.NullPointerException: User object is null
 ```json
 {
   "error": {
-    "code": "INTERNAL_ERROR",
+    "code": "InternalServerError",
     "message": "服务器内部错误，请稍后重试",
     "traceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
   }
@@ -2521,7 +2520,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "UNAUTHORIZED",
+    "code": "Unauthorized",
     "message": "未提供认证令牌"
   }
 }
@@ -2563,7 +2562,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "TOKEN_EXPIRED",
+    "code": "TokenExpired",
     "message": "访问令牌已过期，请刷新令牌"
   }
 }
@@ -2905,7 +2904,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限执行此操作",
     "requiredRole": "admin",
     "currentRole": "user"
@@ -2970,7 +2969,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您只能修改自己的信息"
   }
 }
@@ -3020,7 +3019,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限删除用户",
     "requiredPermission": "users:delete",
     "currentPermissions": ["users:read", "users:write", "posts:read", "posts:write", "posts:delete"]
@@ -3101,7 +3100,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限修改角色字段",
     "details": [
       {
@@ -3219,7 +3218,7 @@ WWW-Authenticate: Bearer realm="API"
 
 {
   "error": {
-    "code": "UNAUTHORIZED",
+    "code": "Unauthorized",
     "message": "请先登录"
   }
 }
@@ -3231,7 +3230,7 @@ HTTP/1.1 403 Forbidden
 
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限访问此资源"
   }
 }
@@ -3245,7 +3244,7 @@ HTTP/1.1 403 Forbidden
 ```json
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限删除此文章",
     "reason": "只有文章作者或管理员可以删除文章"
   }
@@ -3256,7 +3255,7 @@ HTTP/1.1 403 Forbidden
 ```json
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "Access denied"
   }
 }
@@ -3266,7 +3265,7 @@ HTTP/1.1 403 Forbidden
 ```json
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "User ID 123 does not have admin role in database table users"
   }
 }
@@ -3611,7 +3610,7 @@ X-RateLimit-Reset: 1710842460
 
 {
   "error": {
-    "code": "RATE_LIMIT_EXCEEDED",
+    "code": "RateLimitExceeded",
     "message": "请求过于频繁，请60秒后再试",
     "retryAfter": 60
   }
@@ -3899,7 +3898,7 @@ function rateLimitMiddleware(options = {}) {
 ```json
 {
   "error": {
-    "code": "RATE_LIMIT_EXCEEDED",
+    "code": "RateLimitExceeded",
     "message": "您已超出请求限制（100次/分钟），请60秒后再试",
     "retryAfter": 60,
     "limit": 100,
@@ -4227,7 +4226,7 @@ Content-Type: application/json
 
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
