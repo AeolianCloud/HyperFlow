@@ -2,6 +2,8 @@
 
 本文档定义RESTful API的设计标准，确保API的一致性、可维护性和易用性。
 
+> 参考规范：[Microsoft Azure REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md)
+
 ## 目录
 
 1. [资源命名规范](#资源命名规范)
@@ -144,13 +146,13 @@ API必须根据操作类型正确使用HTTP方法，遵循RESTful语义和幂等
 ```
 GET /api/v1/users
 响应：200 OK
-{
-  "data": [...],
-  "total": 100,
-  "offset": 0,
-  "limit": 20
-}
+[
+  { "id": 1, "name": "张三" },
+  ...
+]
 ```
+
+> 注：分页元数据通过响应头返回，如 `Total-Count`、`Link` 等。
 
 2. **获取单个资源**
 ```
@@ -430,10 +432,17 @@ Location: /api/v1/users/124
 ```
 POST /api/v1/reports/generate
 响应：202 Accepted
+Operation-Location: /api/v1/operations/op-456
+```
+
+客户端通过轮询 `Operation-Location` 头中的 URL 查询操作进度：
+```
+GET /api/v1/operations/op-456
+响应：200 OK
 {
-  "taskId": "task-123",
-  "status": "processing",
-  "statusUrl": "/api/v1/tasks/task-123"
+  "id": "op-456",
+  "status": "running",
+  "percentComplete": 50
 }
 ```
 
@@ -498,7 +507,7 @@ POST /api/v1/users
 响应：400 Bad Request
 {
   "error": {
-    "code": "VALIDATION_ERROR",
+    "code": "ValidationError",
     "message": "请求参数验证失败",
     "details": [
       {
@@ -524,7 +533,7 @@ GET /api/v1/users/me
 WWW-Authenticate: Bearer realm="API"
 {
   "error": {
-    "code": "UNAUTHORIZED",
+    "code": "Unauthorized",
     "message": "认证失败，请提供有效的访问令牌"
   }
 }
@@ -543,7 +552,7 @@ DELETE /api/v1/users/123
 响应：403 Forbidden
 {
   "error": {
-    "code": "FORBIDDEN",
+    "code": "Forbidden",
     "message": "您没有权限删除此用户"
   }
 }
@@ -562,7 +571,7 @@ GET /api/v1/users/999
 响应：404 Not Found
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
@@ -581,7 +590,7 @@ POST /api/v1/users/123
 Allow: GET, PUT, PATCH, DELETE
 {
   "error": {
-    "code": "METHOD_NOT_ALLOWED",
+    "code": "MethodNotAllowed",
     "message": "此端点不支持POST方法"
   }
 }
@@ -602,7 +611,7 @@ POST /api/v1/users
 响应：409 Conflict
 {
   "error": {
-    "code": "CONFLICT",
+    "code": "Conflict",
     "message": "该邮箱已被注册"
   }
 }
@@ -622,7 +631,7 @@ POST /api/v1/orders
 响应：422 Unprocessable Entity
 {
   "error": {
-    "code": "INVALID_DATA",
+    "code": "InvalidData",
     "message": "订单数量必须大于0"
   }
 }
@@ -646,7 +655,7 @@ X-RateLimit-Remaining: 0
 X-RateLimit-Reset: 1710842460
 {
   "error": {
-    "code": "RATE_LIMIT_EXCEEDED",
+    "code": "RateLimitExceeded",
     "message": "请求过于频繁，请稍后再试"
   }
 }
@@ -669,7 +678,7 @@ GET /api/v1/users
 响应：500 Internal Server Error
 {
   "error": {
-    "code": "INTERNAL_ERROR",
+    "code": "InternalServerError",
     "message": "服务器内部错误，请稍后重试"
   }
 }
@@ -701,7 +710,7 @@ GET /api/v1/users
 Retry-After: 300
 {
   "error": {
-    "code": "SERVICE_UNAVAILABLE",
+    "code": "ServiceUnavailable",
     "message": "服务维护中，预计5分钟后恢复"
   }
 }
@@ -841,9 +850,10 @@ GET /api/v1/users
 Deprecation: true
 Sunset: Sat, 31 Dec 2024 23:59:59 GMT
 Link: </api/v2/users>; rel="successor-version"
-{
-  "data": [...]
-}
+[
+  { "id": 1, "name": "张三" },
+  ...
+]
 ```
 
 **响应头说明：**
@@ -860,7 +870,7 @@ GET /api/v1/users
 响应：410 Gone
 {
   "error": {
-    "code": "VERSION_RETIRED",
+    "code": "VersionRetired",
     "message": "API v1已停止服务，请使用v2",
     "migrationGuide": "https://docs.example.com/migration/v1-to-v2"
   }
@@ -1003,28 +1013,24 @@ Content-Type: application/json
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 95
 X-RateLimit-Reset: 1710842460
+Total-Count: 156
 
-{
-  "data": [
-    {
-      "id": 123,
-      "name": "张三",
-      "email": "zhangsan@example.com",
-      "status": "active",
-      "createdAt": "2024-03-19T10:00:00Z"
-    },
-    {
-      "id": 124,
-      "name": "李四",
-      "email": "lisi@example.com",
-      "status": "active",
-      "createdAt": "2024-03-18T15:30:00Z"
-    }
-  ],
-  "total": 156,
-  "offset": 0,
-  "limit": 20
-}
+[
+  {
+    "id": 123,
+    "name": "张三",
+    "email": "zhangsan@example.com",
+    "status": "active",
+    "createdAt": "2024-03-19T10:00:00Z"
+  },
+  {
+    "id": 124,
+    "name": "李四",
+    "email": "lisi@example.com",
+    "status": "active",
+    "createdAt": "2024-03-18T15:30:00Z"
+  }
+]
 ```
 
 **符合的规范：**
@@ -1141,27 +1147,23 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
+Total-Count: 1
 
-{
-  "data": [
-    {
-      "id": 456,
-      "userId": 123,
-      "total": 299.99,
-      "status": "completed",
-      "createdAt": "2024-03-15T10:00:00Z"
-    }
-  ],
-  "total": 1,
-  "offset": 0,
-  "limit": 20
-}
+[
+  {
+    "id": 456,
+    "userId": 123,
+    "total": 299.99,
+    "status": "completed",
+    "createdAt": "2024-03-15T10:00:00Z"
+  }
+]
 ```
 
 **符合的规范：**
 - ✓ 使用嵌套路径表达资源关系
 - ✓ 返回200状态码
-- ✓ 包含分页元数据
+- ✓ 分页总数通过 `Total-Count` 响应头返回，响应体直接为资源数组
 
 ### 常见错误示例与改进
 
@@ -1244,7 +1246,7 @@ HTTP/1.1 404 Not Found
 HTTP/1.1 400 Bad Request
 {
   "error": {
-    "code": "VALIDATION_ERROR",
+    "code": "ValidationError",
     "message": "请求参数验证失败",
     "details": [
       {
@@ -1258,7 +1260,7 @@ HTTP/1.1 400 Bad Request
 HTTP/1.1 404 Not Found
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
@@ -1318,7 +1320,7 @@ GET /api/v1/users/999
 HTTP/1.1 404 Not Found
 {
   "error": {
-    "code": "NOT_FOUND",
+    "code": "NotFound",
     "message": "用户不存在"
   }
 }
@@ -1337,7 +1339,10 @@ HTTP/1.1 404 Not Found
 - [ ] 使用正确的HTTP方法（GET/POST/PUT/PATCH/DELETE）
 - [ ] 返回正确的HTTP状态码
 - [ ] 创建资源返回201和Location头
+- [ ] 成功响应直接返回资源对象，不使用 `{"data": ...}` 包装层
+- [ ] 异步操作返回 202 + `Operation-Location` header
 - [ ] 错误响应使用统一格式
+- [ ] 错误码使用 PascalCase 格式（如 NotFound、InternalServerError）
 - [ ] 支持分页（offset/limit）
 - [ ] 支持过滤和排序
 - [ ] 包含认证机制（Authorization头）
