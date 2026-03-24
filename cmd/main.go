@@ -7,16 +7,22 @@ package main
 // @BasePath        /api/pve
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	_ "hyperflow/docs"
+	"hyperflow/internal/logger"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
@@ -26,19 +32,15 @@ func main() {
 	_ = godotenv.Load()
 
 	// 初始化 PveClient，缺失配置快速失败
-	client, err := pve.NewClient()
-	if err != nil {
-		log.Fatalf("PVE configuration error: %v", err)
-	}
-
-	nodesSvc := pve.NewNodesService(client)
-	vmsSvc := pve.NewVmsService(client)
-	storageSvc := pve.NewStorageService(client)
-
 	// 初始化 MySQL 连接
 	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
 		log.Fatal("MYSQL_DSN environment variable is required")
+	}
+	var err error
+	dsn, err = normalizeMySQLDSN(dsn)
+	if err != nil {
+		log.Fatalf("invalid MySQL DSN: %v", err)
 	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -47,15 +49,32 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("failed to connect to MySQL: %v", err)
 	}
+	defer db.Close()
+
+	logWriter := logger.NewMySQLLogger(db)
+	if err := logWriter.CreateTable(); err != nil {
+		log.Fatalf("failed to create logs table: %v", err)
+	}
+
+	client, err := pve.NewClient(logWriter)
+	if err != nil {
+		log.Fatalf("PVE configuration error: %v", err)
+	}
+
+	nodesSvc := pve.NewNodesService(client)
+	vmsSvc := pve.NewVmsService(client)
+	storageSvc := pve.NewStorageService(client)
 
 	// 初始化 operations 持久化层并确保表存在
 	store := operations.NewMySQLStore(db)
 	if err := store.CreateTable(); err != nil {
 		log.Fatalf("failed to create operations table: %v", err)
 	}
-	operationsSvc := operations.NewService(store, vmsSvc)
+	operationsSvc := operations.NewService(store, vmsSvc, logWriter)
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(requestLoggingMiddleware(logWriter))
 
 	// 注册所有 /api/pve/* 路由
 	apipve := r.Group("/api/pve")
@@ -72,5 +91,30 @@ func main() {
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	r.Run(":8080")
+	requestLoggerGlobal = logWriter
+
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	<-signals
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown error: %v", err)
+	}
+
+	logDrainCtx, logDrainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer logDrainCancel()
+	logWriter.Shutdown(logDrainCtx)
 }

@@ -5,19 +5,21 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"hyperflow/internal/timeutil"
 )
 
 // Operation 表示一个异步操作记录，遵循微软 LRO 规范
 type Operation struct {
-	ID               string     `json:"id"`
-	Status           string     `json:"status"` // Running / Succeeded / Failed
-	PVENode          string     `json:"-"`
-	PVEUpid          string     `json:"-"`
-	ResourceLocation string     `json:"resourceLocation,omitempty"`
-	ErrorCode        string     `json:"-"`
-	ErrorMessage     string     `json:"-"`
-	CreatedAt        time.Time  `json:"-"`
-	UpdatedAt        time.Time  `json:"-"`
+	ID               string    `json:"id"`
+	Status           string    `json:"status"` // Running / Succeeded / Failed
+	PVENode          string    `json:"-"`
+	PVEUpid          string    `json:"-"`
+	ResourceLocation string    `json:"resourceLocation,omitempty"`
+	ErrorCode        string    `json:"-"`
+	ErrorMessage     string    `json:"-"`
+	CreatorRequestID string    `json:"-"`
+	CreatedAt        time.Time `json:"-"`
+	UpdatedAt        time.Time `json:"-"`
 }
 
 // Store 定义 Operation 持久化接口
@@ -40,24 +42,29 @@ func NewMySQLStore(db *sql.DB) Store {
 // CreateTable 确保 operations 表存在
 func (s *mysqlStore) CreateTable() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS operations (
-		id               VARCHAR(32)  NOT NULL PRIMARY KEY,
-		status           VARCHAR(16)  NOT NULL,
-		pve_node         VARCHAR(128) NOT NULL,
-		pve_upid         VARCHAR(256) NOT NULL,
-		resource_location VARCHAR(256) NOT NULL DEFAULT '',
-		error_code       VARCHAR(64)  NOT NULL DEFAULT '',
-		error_message    TEXT         NOT NULL,
-		created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		id                 VARCHAR(32)  NOT NULL PRIMARY KEY,
+		status             VARCHAR(16)  NOT NULL,
+		pve_node           VARCHAR(128) NOT NULL,
+		pve_upid           VARCHAR(256) NOT NULL,
+		resource_location  VARCHAR(256) NOT NULL DEFAULT '',
+		error_code         VARCHAR(64)  NOT NULL DEFAULT '',
+		error_message      TEXT         NOT NULL,
+		creator_request_id VARCHAR(32)  NULL,
+		created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 	)`)
 	return err
 }
 
 // Insert 写入一条新 operation 记录
 func (s *mysqlStore) Insert(op *Operation) error {
+	now := timeutil.NowShanghai()
 	_, err := s.db.Exec(
-		`INSERT INTO operations (id, status, pve_node, pve_upid, resource_location, error_code, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		op.ID, op.Status, op.PVENode, op.PVEUpid, op.ResourceLocation, op.ErrorCode, op.ErrorMessage,
+		`INSERT INTO operations (
+			id, status, pve_node, pve_upid, resource_location,
+			error_code, error_message, creator_request_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		op.ID, op.Status, op.PVENode, op.PVEUpid, op.ResourceLocation, op.ErrorCode, op.ErrorMessage, nullableString(op.CreatorRequestID), now, now,
 	)
 	return err
 }
@@ -65,24 +72,36 @@ func (s *mysqlStore) Insert(op *Operation) error {
 // GetByID 按 ID 查询 operation 记录，不存在时返回 nil, nil
 func (s *mysqlStore) GetByID(id string) (*Operation, error) {
 	row := s.db.QueryRow(
-		`SELECT id, status, pve_node, pve_upid, resource_location, error_code, error_message, created_at, updated_at FROM operations WHERE id = ?`, id,
+		`SELECT id, status, pve_node, pve_upid, resource_location, error_code, error_message, creator_request_id, created_at, updated_at FROM operations WHERE id = ?`, id,
 	)
 	op := &Operation{}
-	err := row.Scan(&op.ID, &op.Status, &op.PVENode, &op.PVEUpid, &op.ResourceLocation, &op.ErrorCode, &op.ErrorMessage, &op.CreatedAt, &op.UpdatedAt)
+	var creatorRequestID sql.NullString
+	err := row.Scan(&op.ID, &op.Status, &op.PVENode, &op.PVEUpid, &op.ResourceLocation, &op.ErrorCode, &op.ErrorMessage, &creatorRequestID, &op.CreatedAt, &op.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	op.CreatorRequestID = creatorRequestID.String
+	op.CreatedAt = timeutil.InShanghai(op.CreatedAt)
+	op.UpdatedAt = timeutil.InShanghai(op.UpdatedAt)
 	return op, nil
 }
 
 // UpdateStatus 更新 operation 的状态及可选错误信息
 func (s *mysqlStore) UpdateStatus(id, status, errorCode, errorMessage string) error {
+	updatedAt := timeutil.NowShanghai()
 	_, err := s.db.Exec(
-		`UPDATE operations SET status = ?, error_code = ?, error_message = ? WHERE id = ?`,
-		status, errorCode, errorMessage, id,
+		`UPDATE operations SET status = ?, error_code = ?, error_message = ?, updated_at = ? WHERE id = ?`,
+		status, errorCode, errorMessage, updatedAt, id,
 	)
 	return err
+}
+
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
 }
