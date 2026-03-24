@@ -73,6 +73,7 @@ func main() {
 	operationsSvc := operations.NewService(store, vmsSvc, logWriter)
 
 	r := gin.New()
+	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(requestLoggingMiddleware(logWriter))
 
