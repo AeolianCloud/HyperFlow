@@ -2,6 +2,8 @@ package pve
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,6 +60,22 @@ func (s *VmsService) DeleteVm(node, vmid string) (json.RawMessage, error) {
 	return s.client.Delete("/nodes/" + node + "/qemu/" + vmid)
 }
 
+// GetTaskStatus 查询 PVE 节点上指定任务的状态，返回 pveStatus（"running"/"stopped"）和 exitStatus（"OK" 或错误信息）
+func (s *VmsService) GetTaskStatus(node, upid string) (string, string, error) {
+	data, err := s.client.Get("/nodes/" + node + "/tasks/" + upid + "/status")
+	if err != nil {
+		return "", "", err
+	}
+	var result struct {
+		Status     string `json:"status"`
+		ExitStatus string `json:"exitstatus"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", "", err
+	}
+	return result.Status, result.ExitStatus, nil
+}
+
 // CreateVmRequest 新建虚拟机请求参数
 type CreateVmRequest struct {
 	VMID          int    `json:"vmid" example:"200"`                                        // 新虚拟机 VMID（必填）
@@ -82,6 +100,14 @@ type CreateVmRequest struct {
 }
 
 func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage, error) {
+	// name 未填时随机生成，格式 vm-<8位随机hex>，确保不重复
+	if req.Name == "" {
+		b := make([]byte, 4)
+		if _, err := rand.Read(b); err != nil {
+			return nil, fmt.Errorf("failed to generate vm name: %w", err)
+		}
+		req.Name = "vm-" + hex.EncodeToString(b)
+	}
 	iface := req.DiskInterface
 	if iface == "" {
 		iface = "virtio0"
@@ -118,7 +144,7 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 				return nil, fmt.Errorf("snippetsStorage is required when ciPackages is specified")
 			}
 			snippetName := fmt.Sprintf("cloudinit-%d-userdata.yaml", req.VMID)
-			userData := buildCloudInitUserData(req.CIPackages, req.CIUser, req.CIPassword, req.SSHKeys, req.AptMirror)
+			userData := buildCloudInitUserData(req.Name, req.CIPackages, req.CIUser, req.CIPassword, req.SSHKeys, req.AptMirror)
 			if err := s.UploadSnippet(node, req.SnippetsStorage, snippetName, userData); err != nil {
 				return nil, err
 			}
@@ -152,10 +178,16 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 	return s.client.PostWithBody("/nodes/"+node+"/qemu", bytes.NewReader(bodyBytes))
 }
 
-// buildCloudInitUserData 生成 cloud-init user-data YAML 内容，默认执行软件包更新和升级
-func buildCloudInitUserData(packages []string, ciUser, ciPassword, sshKeys, aptMirror string) string {
+// buildCloudInitUserData 生成 cloud-init user-data YAML 内容，默认执行软件包更新和升级。
+// name 用于设置虚拟机主机名（写入 hostname/fqdn 字段），传空字符串则不写入。
+func buildCloudInitUserData(name string, packages []string, ciUser, ciPassword, sshKeys, aptMirror string) string {
 	var sb strings.Builder
 	sb.WriteString("#cloud-config\n")
+	if name != "" {
+		sb.WriteString("hostname: " + name + "\n")
+		sb.WriteString("fqdn: " + name + "\n")
+		sb.WriteString("preserve_hostname: false\n")
+	}
 	if aptMirror != "" {
 		sb.WriteString("apt:\n")
 		sb.WriteString("  primary:\n")
