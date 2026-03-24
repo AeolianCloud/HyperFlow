@@ -1,5 +1,35 @@
 basePath: /api/pve
 definitions:
+  main.ErrorDetail:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  main.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/main.ErrorDetail'
+    type: object
+  main.OperationErrorBody:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  main.OperationResponse:
+    properties:
+      error:
+        $ref: '#/definitions/main.OperationErrorBody'
+      id:
+        type: string
+      resourceLocation:
+        type: string
+      status:
+        type: string
+    type: object
   pve.CreateVmRequest:
     properties:
       aptMirror:
@@ -78,6 +108,21 @@ definitions:
         example: 200
         type: integer
     type: object
+  pve.VM:
+    properties:
+      cpus:
+        type: integer
+      maxmem:
+        type: integer
+      mem:
+        type: integer
+      name:
+        type: string
+      status:
+        type: string
+      vmid:
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -94,20 +139,18 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            items:
+              additionalProperties: true
+              type: object
+            type: array
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 列出所有节点
       tags:
       - nodes
@@ -131,22 +174,16 @@ paths:
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: 获取指定节点信息
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: 获取节点详情
       tags:
       - nodes
   /nodes/{node}/vms:
@@ -164,20 +201,17 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            items:
+              $ref: '#/definitions/pve.VM'
+            type: array
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 列出节点上所有虚拟机
       tags:
       - vms
@@ -189,14 +223,14 @@ paths:
         支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
         当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
         ciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。
-        成功后响应 Location 头指向新虚拟机资源路径。
+        成功后响应 Operation-Location 及 Location 头。
       parameters:
       - description: 节点名称
         in: path
         name: node
         required: true
         type: string
-      - description: 创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit
+      - description: 创建参数（vmid、cores、memory、diskSource、storage 为必填；name 为可选，不填时自动生成随机主机名；CloudInit
           字段均为可选；ciPackages 非空时 snippetsStorage 必填）
         in: body
         name: body
@@ -208,45 +242,32 @@ paths:
       responses:
         "202":
           description: Accepted
-          schema:
-            additionalProperties: true
-            type: object
         "400":
           description: Bad Request
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 新建虚拟机并导入磁盘
       tags:
       - vms
   /nodes/{node}/vms/{vmid}:
     delete:
-      description: 异步删除指定虚拟机，返回 PVE 任务 ID
+      description: 异步删除指定虚拟机（虚拟机须处于停止状态），返回 LRO Operation-Location header
       parameters:
       - description: 节点名称
         in: path
@@ -263,27 +284,22 @@ paths:
       responses:
         "202":
           description: Accepted
-          schema:
-            additionalProperties: true
-            type: object
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 删除虚拟机
       tags:
       - vms
@@ -311,27 +327,21 @@ paths:
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 获取指定虚拟机信息
       tags:
       - vms
   /nodes/{node}/vms/{vmid}/start:
     post:
-      description: 异步启动指定虚拟机，返回 PVE 任务 ID
+      description: 异步启动指定虚拟机，返回 LRO Operation-Location header
       parameters:
       - description: 节点名称
         in: path
@@ -348,33 +358,28 @@ paths:
       responses:
         "202":
           description: Accepted
-          schema:
-            additionalProperties: true
-            type: object
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 启动虚拟机
       tags:
       - vms
   /nodes/{node}/vms/{vmid}/stop:
     post:
-      description: 异步停止指定虚拟机，返回 PVE 任务 ID
+      description: 异步停止指定虚拟机，返回 LRO Operation-Location header
       parameters:
       - description: 节点名称
         in: path
@@ -391,30 +396,53 @@ paths:
       responses:
         "202":
           description: Accepted
-          schema:
-            additionalProperties: true
-            type: object
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 停止虚拟机
       tags:
       - vms
+  /operations/{id}:
+    get:
+      description: 返回指定异步操作的当前状态，遵循微软 LRO 规范。status 为 Running / Succeeded / Failed
+        之一。
+      parameters:
+      - description: 操作 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.OperationResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: 查询异步操作状态
+      tags:
+      - operations
   /storage:
     get:
       description: 返回 PVE 中所有存储资源列表
@@ -424,20 +452,18 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            items:
+              additionalProperties: true
+              type: object
+            type: array
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.ErrorResponse'
       summary: 列出所有存储
       tags:
       - storage

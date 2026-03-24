@@ -6,46 +6,75 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
 
-func respondOK(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, gin.H{"data": data})
+// ErrorDetail 标准错误详情，遵循微软 REST API Guidelines
+type ErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-func respondAccepted(c *gin.Context, data any) {
-	c.JSON(http.StatusAccepted, gin.H{"data": data})
+// ErrorResponse 标准错误响应体
+type ErrorResponse struct {
+	Error ErrorDetail `json:"error"`
+}
+
+// OperationResponse 异步操作状态响应，遵循微软 LRO 规范
+type OperationResponse struct {
+	ID               string              `json:"id"`
+	Status           string              `json:"status"`
+	ResourceLocation string              `json:"resourceLocation,omitempty"`
+	Error            *OperationErrorBody `json:"error,omitempty"`
+}
+
+// OperationErrorBody LRO 失败时的错误体
+type OperationErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// respondError 输出符合微软 REST API Guidelines 的标准错误响应
+func respondError(c *gin.Context, status int, code, message string) {
+	c.JSON(status, ErrorResponse{Error: ErrorDetail{Code: code, Message: message}})
+}
+
+// respondOK 输出 200 响应，直接输出资源，不包装 data 字段
+func respondOK(c *gin.Context, data any) {
+	c.JSON(http.StatusOK, data)
 }
 
 func handlePveError(c *gin.Context, err error) {
 	if pveErr, ok := err.(*pve.PveError); ok {
 		switch pveErr.StatusCode {
 		case http.StatusNotFound:
-			c.JSON(http.StatusNotFound, gin.H{"error": pveErr.Message})
+			respondError(c, http.StatusNotFound, "NotFound", pveErr.Message)
 		case http.StatusConflict:
-			c.JSON(http.StatusConflict, gin.H{"error": pveErr.Message})
+			respondError(c, http.StatusConflict, "Conflict", pveErr.Message)
 		case 502:
-			c.JSON(http.StatusBadGateway, gin.H{"error": "PVE server unreachable: " + pveErr.Message})
+			respondError(c, http.StatusBadGateway, "BadGateway", "PVE server unreachable: "+pveErr.Message)
 		default:
-			c.JSON(pveErr.StatusCode, gin.H{"error": pveErr.Message})
+			respondError(c, pveErr.StatusCode, "InternalServerError", pveErr.Message)
 		}
 		return
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 }
 
 var nodesSvcGlobal *pve.NodesService
 var vmsSvcGlobal *pve.VmsService
 var storageSvcGlobal *pve.StorageService
+var operationsSvcGlobal *operations.Service
 
 // listNodes godoc
 // @Summary      列出所有节点
 // @Description  返回 PVE 集群中所有节点列表
 // @Tags         nodes
 // @Produce      json
-// @Success      200  {object}  map[string]any
-// @Failure      500  {object}  map[string]string
-// @Failure      502  {object}  map[string]string
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /nodes [get]
 func listNodes(c *gin.Context) {
 	nodes, err := nodesSvcGlobal.ListNodes()
@@ -57,15 +86,15 @@ func listNodes(c *gin.Context) {
 }
 
 // getNode godoc
-// @Summary      获取指定节点信息
+// @Summary      获取节点详情
 // @Description  返回指定节点的详细状态信息
 // @Tags         nodes
 // @Produce      json
 // @Param        node  path      string  true  "节点名称"
 // @Success      200   {object}  map[string]any
-// @Failure      404   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Failure      502   {object}  ErrorResponse
 // @Router       /nodes/{node} [get]
 func getNode(c *gin.Context) {
 	node := c.Param("node")
@@ -85,9 +114,9 @@ func getNode(c *gin.Context) {
 // @Tags         vms
 // @Produce      json
 // @Param        node  path      string  true  "节点名称"
-// @Success      200   {object}  map[string]any
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Success      200   {array}   pve.VM
+// @Failure      500   {object}  ErrorResponse
+// @Failure      502   {object}  ErrorResponse
 // @Router       /nodes/{node}/vms [get]
 func listVms(c *gin.Context) {
 	node := c.Param("node")
@@ -107,9 +136,9 @@ func listVms(c *gin.Context) {
 // @Param        node  path      string  true  "节点名称"
 // @Param        vmid  path      string  true  "虚拟机 ID"
 // @Success      200   {object}  map[string]any
-// @Failure      404   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Failure      502   {object}  ErrorResponse
 // @Router       /nodes/{node}/vms/{vmid} [get]
 func getVm(c *gin.Context) {
 	node := c.Param("node")
@@ -126,15 +155,16 @@ func getVm(c *gin.Context) {
 
 // startVm godoc
 // @Summary      启动虚拟机
-// @Description  异步启动指定虚拟机，返回 PVE 任务 ID
+// @Description  异步启动指定虚拟机，返回 LRO Operation-Location header
 // @Tags         vms
 // @Produce      json
-// @Param        node  path      string  true  "节点名称"
-// @Param        vmid  path      string  true  "虚拟机 ID"
-// @Success      202   {object}  map[string]any
-// @Failure      404   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Param        node  path  string  true  "节点名称"
+// @Param        vmid  path  string  true  "虚拟机 ID"
+// @Success      202
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /nodes/{node}/vms/{vmid}/start [post]
 func startVm(c *gin.Context) {
 	node := c.Param("node")
@@ -144,22 +174,29 @@ func startVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var result any
-	json.Unmarshal(data, &result)
-	respondAccepted(c, result)
+	var upid string
+	json.Unmarshal(data, &upid)
+	op, err := operationsSvcGlobal.CreateOperation(node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
+	c.Status(http.StatusAccepted)
 }
 
 // stopVm godoc
 // @Summary      停止虚拟机
-// @Description  异步停止指定虚拟机，返回 PVE 任务 ID
+// @Description  异步停止指定虚拟机，返回 LRO Operation-Location header
 // @Tags         vms
 // @Produce      json
-// @Param        node  path      string  true  "节点名称"
-// @Param        vmid  path      string  true  "虚拟机 ID"
-// @Success      202   {object}  map[string]any
-// @Failure      404   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Param        node  path  string  true  "节点名称"
+// @Param        vmid  path  string  true  "虚拟机 ID"
+// @Success      202
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /nodes/{node}/vms/{vmid}/stop [post]
 func stopVm(c *gin.Context) {
 	node := c.Param("node")
@@ -169,22 +206,29 @@ func stopVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var result any
-	json.Unmarshal(data, &result)
-	respondAccepted(c, result)
+	var upid string
+	json.Unmarshal(data, &upid)
+	op, err := operationsSvcGlobal.CreateOperation(node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
+	c.Status(http.StatusAccepted)
 }
 
 // deleteVm godoc
 // @Summary      删除虚拟机
-// @Description  异步删除指定虚拟机，返回 PVE 任务 ID
+// @Description  异步删除指定虚拟机（虚拟机须处于停止状态），返回 LRO Operation-Location header
 // @Tags         vms
 // @Produce      json
-// @Param        node  path      string  true  "节点名称"
-// @Param        vmid  path      string  true  "虚拟机 ID"
-// @Success      202   {object}  map[string]any
-// @Failure      404   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Param        node  path  string  true  "节点名称"
+// @Param        vmid  path  string  true  "虚拟机 ID"
+// @Success      202
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /nodes/{node}/vms/{vmid} [delete]
 func deleteVm(c *gin.Context) {
 	node := c.Param("node")
@@ -194,9 +238,15 @@ func deleteVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var result any
-	json.Unmarshal(data, &result)
-	respondAccepted(c, result)
+	var upid string
+	json.Unmarshal(data, &upid)
+	op, err := operationsSvcGlobal.CreateOperation(node, upid, "")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
+	c.Status(http.StatusAccepted)
 }
 
 // createVm godoc
@@ -205,32 +255,32 @@ func deleteVm(c *gin.Context) {
 // @Description  支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
 // @Description  当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
 // @Description  ciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。
-// @Description  成功后响应 Location 头指向新虚拟机资源路径。
+// @Description  成功后响应 Operation-Location 及 Location 头。
 // @Tags         vms
 // @Accept       json
 // @Produce      json
-// @Param        node  path      string               true  "节点名称"
-// @Param        body  body      pve.CreateVmRequest  true  "创建参数（vmid、name、cores、memory、diskSource、storage 为必填；CloudInit 字段均为可选；ciPackages 非空时 snippetsStorage 必填）"
-// @Success      202   {object}  map[string]any
-// @Failure      400   {object}  map[string]string
-// @Failure      404   {object}  map[string]string
-// @Failure      409   {object}  map[string]string
-// @Failure      500   {object}  map[string]string
-// @Failure      502   {object}  map[string]string
+// @Param        node  path  string               true  "节点名称"
+// @Param        body  body  pve.CreateVmRequest  true  "创建参数（vmid、cores、memory、diskSource、storage 为必填；name 为可选，不填时自动生成随机主机名；CloudInit 字段均为可选；ciPackages 非空时 snippetsStorage 必填）"
+// @Success      202
+// @Failure      400  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /nodes/{node}/vms [post]
 func createVm(c *gin.Context) {
 	node := c.Param("node")
 	var req pve.CreateVmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
 		return
 	}
-	if req.VMID == 0 || req.Name == "" || req.Cores == 0 || req.Memory == 0 || req.DiskSource == "" || req.Storage == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "vmid, name, cores, memory, diskSource and storage are required"})
+	if req.VMID == 0 || req.Cores == 0 || req.Memory == 0 || req.DiskSource == "" || req.Storage == "" {
+		respondError(c, http.StatusBadRequest, "BadRequest", "vmid, cores, memory, diskSource and storage are required")
 		return
 	}
 	if len(req.CIPackages) > 0 && req.SnippetsStorage == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "snippetsStorage is required when ciPackages is specified"})
+		respondError(c, http.StatusBadRequest, "BadRequest", "snippetsStorage is required when ciPackages is specified")
 		return
 	}
 	data, err := vmsSvcGlobal.CreateVm(node, req)
@@ -238,10 +288,17 @@ func createVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var result any
-	json.Unmarshal(data, &result)
-	c.Header("Location", "/api/pve/nodes/"+node+"/vms/"+fmt.Sprint(req.VMID))
-	respondAccepted(c, result)
+	var upid string
+	json.Unmarshal(data, &upid)
+	vmLocation := "/api/pve/nodes/" + node + "/vms/" + fmt.Sprint(req.VMID)
+	op, err := operationsSvcGlobal.CreateOperation(node, upid, vmLocation)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
+	c.Header("Location", vmLocation)
+	c.Status(http.StatusAccepted)
 }
 
 // listStorage godoc
@@ -249,9 +306,9 @@ func createVm(c *gin.Context) {
 // @Description  返回 PVE 中所有存储资源列表
 // @Tags         storage
 // @Produce      json
-// @Success      200  {object}  map[string]any
-// @Failure      500  {object}  map[string]string
-// @Failure      502  {object}  map[string]string
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
 // @Router       /storage [get]
 func listStorage(c *gin.Context) {
 	storages, err := storageSvcGlobal.ListStorage()
@@ -260,6 +317,38 @@ func listStorage(c *gin.Context) {
 		return
 	}
 	respondOK(c, storages)
+}
+
+// getOperation godoc
+// @Summary      查询异步操作状态
+// @Description  返回指定异步操作的当前状态，遵循微软 LRO 规范。status 为 Running / Succeeded / Failed 之一。
+// @Tags         operations
+// @Produce      json
+// @Param        id  path      string  true  "操作 ID"
+// @Success      200  {object}  OperationResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /operations/{id} [get]
+func getOperation(c *gin.Context) {
+	id := c.Param("id")
+	op, err := operationsSvcGlobal.GetOperation(id)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if op == nil {
+		respondError(c, http.StatusNotFound, "NotFound", "operation not found")
+		return
+	}
+	resp := OperationResponse{
+		ID:               op.ID,
+		Status:           op.Status,
+		ResourceLocation: op.ResourceLocation,
+	}
+	if op.ErrorCode != "" {
+		resp.Error = &OperationErrorBody{Code: op.ErrorCode, Message: op.ErrorMessage}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // registerNodesRoutes 注册节点路由
@@ -284,4 +373,10 @@ func registerVmsRoutes(rg *gin.RouterGroup, svc *pve.VmsService) {
 func registerStorageRoutes(rg *gin.RouterGroup, svc *pve.StorageService) {
 	storageSvcGlobal = svc
 	rg.GET("", listStorage)
+}
+
+// registerOperationsRoutes 注册操作路由
+func registerOperationsRoutes(rg *gin.RouterGroup, svc *operations.Service) {
+	operationsSvcGlobal = svc
+	rg.GET("/:id", getOperation)
 }
