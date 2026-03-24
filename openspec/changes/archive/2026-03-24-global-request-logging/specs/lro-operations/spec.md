@@ -11,6 +11,8 @@ Operation 记录 SHALL 存储 `creator_request_id` 字段，在 `CreateOperation
 - **WHEN** Operation 状态从 Running 变为 Succeeded 或 Failed
 - **THEN** 写入的日志条目 SHALL 使用 `creator_request_id`，而非触发查询的请求 ID
 
+## MODIFIED Requirements
+
 ### Requirement: 通过 WebSocket 订阅操作状态变更
 系统 SHALL 提供 WebSocket 端点，客户端连接后服务端周期性查询操作状态并推送事件；操作进入终态后服务端推送最终状态并主动关闭连接。WebSocket 连接建立和关闭 SHALL 分别写入日志。
 

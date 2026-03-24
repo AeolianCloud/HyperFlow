@@ -2,6 +2,7 @@ package pve
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,12 +16,12 @@ import (
 
 // VM 表示 PVE 虚拟机
 type VM struct {
-	VMID   int     `json:"vmid"`
-	Name   string  `json:"name"`
-	Status string  `json:"status"`
-	CPUs   int     `json:"cpus"`
-	Mem    int64   `json:"mem"`
-	MaxMem int64   `json:"maxmem"`
+	VMID   int    `json:"vmid"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	CPUs   int    `json:"cpus"`
+	Mem    int64  `json:"mem"`
+	MaxMem int64  `json:"maxmem"`
 }
 
 // VmsService 处理虚拟机相关业务逻辑
@@ -32,8 +33,8 @@ func NewVmsService(c *Client) *VmsService {
 	return &VmsService{client: c}
 }
 
-func (s *VmsService) ListVms(node string) ([]VM, error) {
-	data, err := s.client.Get("/nodes/" + node + "/qemu")
+func (s *VmsService) ListVms(ctx context.Context, node string) ([]VM, error) {
+	data, err := s.client.Get(ctx, "/nodes/"+node+"/qemu")
 	if err != nil {
 		return nil, err
 	}
@@ -44,25 +45,25 @@ func (s *VmsService) ListVms(node string) ([]VM, error) {
 	return vms, nil
 }
 
-func (s *VmsService) GetVm(node, vmid string) (json.RawMessage, error) {
-	return s.client.Get("/nodes/" + node + "/qemu/" + vmid + "/status/current")
+func (s *VmsService) GetVm(ctx context.Context, node, vmid string) (json.RawMessage, error) {
+	return s.client.Get(ctx, "/nodes/"+node+"/qemu/"+vmid+"/status/current")
 }
 
-func (s *VmsService) StartVm(node, vmid string) (json.RawMessage, error) {
-	return s.client.Post("/nodes/" + node + "/qemu/" + vmid + "/status/start")
+func (s *VmsService) StartVm(ctx context.Context, node, vmid string) (json.RawMessage, error) {
+	return s.client.Post(ctx, "/nodes/"+node+"/qemu/"+vmid+"/status/start")
 }
 
-func (s *VmsService) StopVm(node, vmid string) (json.RawMessage, error) {
-	return s.client.Post("/nodes/" + node + "/qemu/" + vmid + "/status/stop")
+func (s *VmsService) StopVm(ctx context.Context, node, vmid string) (json.RawMessage, error) {
+	return s.client.Post(ctx, "/nodes/"+node+"/qemu/"+vmid+"/status/stop")
 }
 
-func (s *VmsService) DeleteVm(node, vmid string) (json.RawMessage, error) {
-	return s.client.Delete("/nodes/" + node + "/qemu/" + vmid)
+func (s *VmsService) DeleteVm(ctx context.Context, node, vmid string) (json.RawMessage, error) {
+	return s.client.Delete(ctx, "/nodes/"+node+"/qemu/"+vmid)
 }
 
 // GetTaskStatus 查询 PVE 节点上指定任务的状态，返回 pveStatus（"running"/"stopped"）和 exitStatus（"OK" 或错误信息）
-func (s *VmsService) GetTaskStatus(node, upid string) (string, string, error) {
-	data, err := s.client.Get("/nodes/" + node + "/tasks/" + upid + "/status")
+func (s *VmsService) GetTaskStatus(ctx context.Context, node, upid string) (string, string, error) {
+	data, err := s.client.Get(ctx, "/nodes/"+node+"/tasks/"+upid+"/status")
 	if err != nil {
 		return "", "", err
 	}
@@ -78,28 +79,28 @@ func (s *VmsService) GetTaskStatus(node, upid string) (string, string, error) {
 
 // CreateVmRequest 新建虚拟机请求参数
 type CreateVmRequest struct {
-	VMID          int    `json:"vmid" example:"200"`                                        // 新虚拟机 VMID（必填）
-	Name          string `json:"name" example:"my-vm"`                                      // 虚拟机名称（必填）
-	Cores         int    `json:"cores" example:"2"`                                         // CPU 核数（必填）
-	Memory        int    `json:"memory" example:"2048"`                                     // 内存大小，单位 MB（必填）
+	VMID          int    `json:"vmid" example:"200"`                                                  // 新虚拟机 VMID（必填）
+	Name          string `json:"name" example:"my-vm"`                                                // 虚拟机名称（必填）
+	Cores         int    `json:"cores" example:"2"`                                                   // CPU 核数（必填）
+	Memory        int    `json:"memory" example:"2048"`                                               // 内存大小，单位 MB（必填）
 	DiskSource    string `json:"diskSource" example:"local:import/noble-server-cloudimg-amd64.qcow2"` // 导入磁盘来源，格式 storage:path（必填）
-	DiskInterface string `json:"diskInterface,omitempty" example:"scsi0"`                   // 磁盘接口类型，默认 virtio0（可选）
-	DiskFormat    string `json:"diskFormat,omitempty" example:"qcow2"`                      // 源磁盘格式，如 qcow2/raw（可选）
-	Storage       string `json:"storage" example:"local-lvm"`                               // 目标存储池（必填）
-	Network       string `json:"network,omitempty" example:"virtio,bridge=vmbr0"`              // 网络设备配置，格式同 PVE net0，默认 virtio,bridge=vmbr0（可选）
+	DiskInterface string `json:"diskInterface,omitempty" example:"scsi0"`                             // 磁盘接口类型，默认 virtio0（可选）
+	DiskFormat    string `json:"diskFormat,omitempty" example:"qcow2"`                                // 源磁盘格式，如 qcow2/raw（可选）
+	Storage       string `json:"storage" example:"local-lvm"`                                         // 目标存储池（必填）
+	Network       string `json:"network,omitempty" example:"virtio,bridge=vmbr0"`                     // 网络设备配置，格式同 PVE net0，默认 virtio,bridge=vmbr0（可选）
 	// CloudInit 配置（可选，使用云镜像时配置首次启动参数）
-	CIUser       string `json:"ciUser,omitempty" example:"ubuntu"`                          // CloudInit 登录用户名（可选）
-	CIPassword   string `json:"ciPassword,omitempty" example:"secret"`                     // CloudInit 登录密码（可选）
-	SSHKeys      string `json:"sshKeys,omitempty" example:"ssh-rsa AAAA..."`               // CloudInit SSH 公钥，多个公钥用换行分隔（可选）
-	IPConfig0    string `json:"ipConfig0,omitempty" example:"ip=192.168.1.100/24,gw=192.168.1.1"` // CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）
-	Nameserver      string   `json:"nameserver,omitempty" example:"8.8.8.8"`                    // CloudInit DNS 服务器地址（可选）
-	SearchDomain    string   `json:"searchDomain,omitempty" example:"example.com"`              // CloudInit DNS 搜索域（可选）
-	CIPackages      []string `json:"ciPackages,omitempty" example:"qemu-guest-agent"`        // CloudInit 首次开机需安装的软件包列表（可选；非空时须同时指定 snippetsStorage）
-	SnippetsStorage string   `json:"snippetsStorage,omitempty" example:"local"`                  // 存放 cloud-init user-data Snippet 的 PVE 存储名称（ciPackages 非空时必填）
-	AptMirror      string   `json:"aptMirror,omitempty" example:"http://mirrors.aliyun.com/ubuntu"` // APT 镜像源地址，写入 cloud-init apt.primary（可选，仅 ciPackages 非空时生效）
+	CIUser          string   `json:"ciUser,omitempty" example:"ubuntu"`                                // CloudInit 登录用户名（可选）
+	CIPassword      string   `json:"ciPassword,omitempty" example:"secret"`                            // CloudInit 登录密码（可选）
+	SSHKeys         string   `json:"sshKeys,omitempty" example:"ssh-rsa AAAA..."`                      // CloudInit SSH 公钥，多个公钥用换行分隔（可选）
+	IPConfig0       string   `json:"ipConfig0,omitempty" example:"ip=192.168.1.100/24,gw=192.168.1.1"` // CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）
+	Nameserver      string   `json:"nameserver,omitempty" example:"8.8.8.8"`                           // CloudInit DNS 服务器地址（可选）
+	SearchDomain    string   `json:"searchDomain,omitempty" example:"example.com"`                     // CloudInit DNS 搜索域（可选）
+	CIPackages      []string `json:"ciPackages,omitempty" example:"qemu-guest-agent"`                  // CloudInit 首次开机需安装的软件包列表（可选；非空时须同时指定 snippetsStorage）
+	SnippetsStorage string   `json:"snippetsStorage,omitempty" example:"local"`                        // 存放 cloud-init user-data Snippet 的 PVE 存储名称（ciPackages 非空时必填）
+	AptMirror       string   `json:"aptMirror,omitempty" example:"http://mirrors.aliyun.com/ubuntu"`   // APT 镜像源地址，写入 cloud-init apt.primary（可选，仅 ciPackages 非空时生效）
 }
 
-func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage, error) {
+func (s *VmsService) CreateVm(ctx context.Context, node string, req CreateVmRequest) (json.RawMessage, error) {
 	// name 未填时随机生成，格式 vm-<8位随机hex>，确保不重复
 	if req.Name == "" {
 		b := make([]byte, 4)
@@ -124,7 +125,7 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 		"cpu":     "host",
 		"machine": "q35",
 		"scsihw":  "virtio-scsi-single",
-		iface:    diskVal,
+		iface:     diskVal,
 	}
 	net := req.Network
 	if net == "" {
@@ -145,7 +146,7 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 			}
 			snippetName := fmt.Sprintf("cloudinit-%d-userdata.yaml", req.VMID)
 			userData := buildCloudInitUserData(req.Name, req.CIPackages, req.CIUser, req.CIPassword, req.SSHKeys, req.AptMirror)
-			if err := s.UploadSnippet(node, req.SnippetsStorage, snippetName, userData); err != nil {
+			if err := s.UploadSnippet(ctx, node, req.SnippetsStorage, snippetName, userData); err != nil {
 				return nil, err
 			}
 			body["cicustom"] = "user=" + req.SnippetsStorage + ":snippets/" + snippetName
@@ -175,7 +176,7 @@ func (s *VmsService) CreateVm(node string, req CreateVmRequest) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	return s.client.PostWithBody("/nodes/"+node+"/qemu", bytes.NewReader(bodyBytes))
+	return s.client.PostWithBody(ctx, "/nodes/"+node+"/qemu", bytes.NewReader(bodyBytes))
 }
 
 // buildCloudInitUserData 生成 cloud-init user-data YAML 内容，默认执行软件包更新和升级。
@@ -233,13 +234,13 @@ func buildCloudInitUserData(name string, packages []string, ciUser, ciPassword, 
 
 // UploadSnippet 通过 WebDAV PUT 将 cloud-init user-data 文件上传至 snippets 目录。
 // 需在 .env 中配置 PVE_SNIPPETS_WEBDAV_URL，可选配置 PVE_SNIPPETS_WEBDAV_USER / PVE_SNIPPETS_WEBDAV_PASSWORD。
-func (s *VmsService) UploadSnippet(node, storage, filename, content string) error {
+func (s *VmsService) UploadSnippet(ctx context.Context, node, storage, filename, content string) error {
 	baseURL := os.Getenv("PVE_SNIPPETS_WEBDAV_URL")
 	if baseURL == "" {
 		return fmt.Errorf("PVE_SNIPPETS_WEBDAV_URL is not configured")
 	}
 	targetURL := strings.TrimRight(baseURL, "/") + "/" + filename
-	req, err := http.NewRequest(http.MethodPut, targetURL, strings.NewReader(content))
+	req, err := http.NewRequestWithContext(contextOrBackground(ctx), http.MethodPut, targetURL, strings.NewReader(content))
 	if err != nil {
 		return err
 	}

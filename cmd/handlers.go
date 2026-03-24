@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"hyperflow/internal/logger"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
@@ -68,6 +70,7 @@ var nodesSvcGlobal *pve.NodesService
 var vmsSvcGlobal *pve.VmsService
 var storageSvcGlobal *pve.StorageService
 var operationsSvcGlobal *operations.Service
+var requestLoggerGlobal logger.Logger
 
 // listNodes godoc
 // @Summary      列出所有节点
@@ -79,7 +82,7 @@ var operationsSvcGlobal *operations.Service
 // @Failure      502  {object}  ErrorResponse
 // @Router       /nodes [get]
 func listNodes(c *gin.Context) {
-	nodes, err := nodesSvcGlobal.ListNodes()
+	nodes, err := nodesSvcGlobal.ListNodes(requestContextFromGin(c))
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -100,7 +103,7 @@ func listNodes(c *gin.Context) {
 // @Router       /nodes/{node} [get]
 func getNode(c *gin.Context) {
 	node := c.Param("node")
-	data, err := nodesSvcGlobal.GetNode(node)
+	data, err := nodesSvcGlobal.GetNode(requestContextFromGin(c), node)
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -122,7 +125,7 @@ func getNode(c *gin.Context) {
 // @Router       /nodes/{node}/vms [get]
 func listVms(c *gin.Context) {
 	node := c.Param("node")
-	vms, err := vmsSvcGlobal.ListVms(node)
+	vms, err := vmsSvcGlobal.ListVms(requestContextFromGin(c), node)
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -145,7 +148,7 @@ func listVms(c *gin.Context) {
 func getVm(c *gin.Context) {
 	node := c.Param("node")
 	vmid := c.Param("vmid")
-	data, err := vmsSvcGlobal.GetVm(node, vmid)
+	data, err := vmsSvcGlobal.GetVm(requestContextFromGin(c), node, vmid)
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -171,14 +174,15 @@ func getVm(c *gin.Context) {
 func startVm(c *gin.Context) {
 	node := c.Param("node")
 	vmid := c.Param("vmid")
-	data, err := vmsSvcGlobal.StartVm(node, vmid)
+	ctx := requestContextFromGin(c)
+	data, err := vmsSvcGlobal.StartVm(ctx, node, vmid)
 	if err != nil {
 		handlePveError(c, err)
 		return
 	}
 	var upid string
 	json.Unmarshal(data, &upid)
-	op, err := operationsSvcGlobal.CreateOperation(node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -203,14 +207,15 @@ func startVm(c *gin.Context) {
 func stopVm(c *gin.Context) {
 	node := c.Param("node")
 	vmid := c.Param("vmid")
-	data, err := vmsSvcGlobal.StopVm(node, vmid)
+	ctx := requestContextFromGin(c)
+	data, err := vmsSvcGlobal.StopVm(ctx, node, vmid)
 	if err != nil {
 		handlePveError(c, err)
 		return
 	}
 	var upid string
 	json.Unmarshal(data, &upid)
-	op, err := operationsSvcGlobal.CreateOperation(node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -235,14 +240,15 @@ func stopVm(c *gin.Context) {
 func deleteVm(c *gin.Context) {
 	node := c.Param("node")
 	vmid := c.Param("vmid")
-	data, err := vmsSvcGlobal.DeleteVm(node, vmid)
+	ctx := requestContextFromGin(c)
+	data, err := vmsSvcGlobal.DeleteVm(ctx, node, vmid)
 	if err != nil {
 		handlePveError(c, err)
 		return
 	}
 	var upid string
 	json.Unmarshal(data, &upid)
-	op, err := operationsSvcGlobal.CreateOperation(node, upid, "")
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "")
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -272,6 +278,7 @@ func deleteVm(c *gin.Context) {
 // @Router       /nodes/{node}/vms [post]
 func createVm(c *gin.Context) {
 	node := c.Param("node")
+	ctx := requestContextFromGin(c)
 	var req pve.CreateVmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
@@ -285,7 +292,7 @@ func createVm(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BadRequest", "snippetsStorage is required when ciPackages is specified")
 		return
 	}
-	data, err := vmsSvcGlobal.CreateVm(node, req)
+	data, err := vmsSvcGlobal.CreateVm(ctx, node, req)
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -293,7 +300,7 @@ func createVm(c *gin.Context) {
 	var upid string
 	json.Unmarshal(data, &upid)
 	vmLocation := "/api/pve/nodes/" + node + "/vms/" + fmt.Sprint(req.VMID)
-	op, err := operationsSvcGlobal.CreateOperation(node, upid, vmLocation)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, vmLocation)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -313,7 +320,7 @@ func createVm(c *gin.Context) {
 // @Failure      502  {object}  ErrorResponse
 // @Router       /storage [get]
 func listStorage(c *gin.Context) {
-	storages, err := storageSvcGlobal.ListStorage()
+	storages, err := storageSvcGlobal.ListStorage(requestContextFromGin(c))
 	if err != nil {
 		handlePveError(c, err)
 		return
@@ -336,9 +343,11 @@ var wsUpgrader = websocket.Upgrader{
 // @Router       /operations/{id}/watch [get]
 func watchOperation(c *gin.Context) {
 	id := c.Param("id")
+	ctx := requestContextFromGin(c)
+	requestID := requestIDFromGin(c)
 
 	// 升级前校验操作存在性
-	op, err := operationsSvcGlobal.GetOperation(id)
+	op, err := operationsSvcGlobal.GetOperation(ctx, id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -352,7 +361,27 @@ func watchOperation(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	if requestLoggerGlobal != nil {
+		requestLoggerGlobal.Log(logger.Entry{
+			RequestID:   requestID,
+			Level:       "INFO",
+			Event:       "ws.connect",
+			OperationID: id,
+		})
+	}
+
+	wsCtx := context.WithValue(context.Background(), logger.RequestIDKey, requestID)
+	defer func() {
+		if requestLoggerGlobal != nil {
+			requestLoggerGlobal.Log(logger.Entry{
+				RequestID:   requestID,
+				Level:       "INFO",
+				Event:       "ws.disconnect",
+				OperationID: id,
+			})
+		}
+		_ = conn.Close()
+	}()
 
 	// 若操作已为终态，推送一条消息后立即关闭
 	if op.Status == "Succeeded" || op.Status == "Failed" {
@@ -368,7 +397,7 @@ func watchOperation(c *gin.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			current, err := operationsSvcGlobal.GetOperation(id)
+			current, err := operationsSvcGlobal.GetOperation(wsCtx, id)
 			if err != nil || current == nil {
 				return
 			}

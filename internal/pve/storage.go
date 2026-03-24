@@ -1,6 +1,9 @@
 package pve
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Storage 表示 PVE 存储池
 type Storage struct {
@@ -21,8 +24,8 @@ func NewStorageService(c *Client) *StorageService {
 	return &StorageService{client: c}
 }
 
-func (s *StorageService) ListStorage() ([]Storage, error) {
-	data, err := s.client.Get("/storage")
+func (s *StorageService) ListStorage(ctx context.Context) ([]Storage, error) {
+	data, err := s.client.Get(ctx, "/storage")
 	if err != nil {
 		return nil, err
 	}
