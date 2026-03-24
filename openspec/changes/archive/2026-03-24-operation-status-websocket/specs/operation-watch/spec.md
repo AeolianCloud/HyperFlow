@@ -1,3 +1,9 @@
+## REMOVED Requirements
+
+### Requirement: 查询长时间运行操作状态
+**Reason**: 替换为 WebSocket 订阅端点，客户端可实时获得状态推送，无需轮询。
+**Migration**: 使用 `GET /api/pve/operations/{id}/watch`（WebSocket）替代原 `GET /api/pve/operations/{id}` REST 接口。
+
 ## ADDED Requirements
 
 ### Requirement: 通过 WebSocket 订阅操作状态变更
@@ -22,7 +28,3 @@
 #### Scenario: 客户端主动断开
 - **WHEN** 客户端在操作终态前关闭 WebSocket 连接
 - **THEN** 系统 SHALL 停止该连接的轮询协程，不产生资源泄漏
-
-#### Scenario: 重启后操作记录仍可查询
-- **WHEN** 服务重启后客户端连接重启前创建的操作
-- **THEN** 系统 SHALL 返回该操作的状态记录（从 MySQL 读取）
