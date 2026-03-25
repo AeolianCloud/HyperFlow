@@ -174,7 +174,17 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "202": {
-                        "description": "Accepted"
+                        "description": "Accepted",
+                        "headers": {
+                            "Location": {
+                                "type": "string",
+                                "description": "/api/pve/nodes/{node}/vms/{vmid}"
+                            },
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -290,7 +300,13 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "202": {
-                        "description": "Accepted"
+                        "description": "Accepted",
+                        "headers": {
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -347,7 +363,13 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "202": {
-                        "description": "Accepted"
+                        "description": "Accepted",
+                        "headers": {
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -404,7 +426,13 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "202": {
-                        "description": "Accepted"
+                        "description": "Accepted",
+                        "headers": {
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -433,13 +461,16 @@ const docTemplate = `{
                 }
             }
         },
-        "/operations/{id}/watch": {
+        "/operations/{id}": {
             "get": {
-                "description": "升级为 WebSocket 连接，服务端每隔 1s 推送操作状态消息。操作进入终态（Succeeded/Failed）后推送最终消息并以 code 1000 正常关闭连接。若操作 ID 不存在则返回 HTTP 404 拒绝升级。",
+                "description": "返回指定异步操作的当前状态，遵循 Microsoft REST API Guidelines LRO 模式。",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "operations"
                 ],
-                "summary": "通过 WebSocket 订阅操作状态",
+                "summary": "获取异步操作状态",
                 "parameters": [
                     {
                         "type": "string",
@@ -450,10 +481,10 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "101": {
-                        "description": "Switching Protocols",
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/main.OperationResponse"
                         }
                     },
                     "404": {
@@ -525,6 +556,34 @@ const docTemplate = `{
             "properties": {
                 "error": {
                     "$ref": "#/definitions/main.ErrorDetail"
+                }
+            }
+        },
+        "main.OperationErrorBody": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.OperationResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/main.OperationErrorBody"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "resourceLocation": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },

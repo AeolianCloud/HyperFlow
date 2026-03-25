@@ -65,12 +65,24 @@ func main() {
 	vmsSvc := pve.NewVmsService(client)
 	storageSvc := pve.NewStorageService(client)
 
+	kafkaConfig, err := loadKafkaConfigFromEnv()
+	if err != nil {
+		log.Fatalf("invalid Kafka configuration: %v", err)
+	}
+
+	kafkaProducer, err := operations.NewKafkaProducer(kafkaConfig.Brokers, kafkaConfig.OperationEventsTopic)
+	if err != nil {
+		log.Fatalf("failed to create Kafka producer: %v", err)
+	}
+
 	// 初始化 operations 持久化层并确保表存在
 	store := operations.NewMySQLStore(db)
 	if err := store.CreateTable(); err != nil {
 		log.Fatalf("failed to create operations table: %v", err)
 	}
-	operationsSvc := operations.NewService(store, vmsSvc, logWriter)
+	operationsSvc := operations.NewService(store, vmsSvc, logWriter, kafkaConfig.OperationEventsTopic)
+	reconciler := operations.NewReconciler(operationsSvc, time.Second, 100)
+	outboxPublisher := operations.NewOutboxPublisher(store, kafkaProducer, logWriter, time.Second, 100)
 
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -92,12 +104,15 @@ func main() {
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	requestLoggerGlobal = logWriter
-
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: r,
 	}
+
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	reconciler.Start(appCtx)
+	outboxPublisher.Start(appCtx)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -109,11 +124,18 @@ func main() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	<-signals
 
+	appCancel()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+
+	workerDrainCtx, workerDrainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer workerDrainCancel()
+	reconciler.Shutdown(workerDrainCtx)
+	outboxPublisher.Shutdown(workerDrainCtx)
 
 	logDrainCtx, logDrainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer logDrainCancel()
