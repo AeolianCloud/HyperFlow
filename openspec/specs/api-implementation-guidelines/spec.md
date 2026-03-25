@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow API 在实现层面的通用约束，如错误处理、分页、过滤、排序、认证、授权、限流和幂等性。
+
+## Requirements
 
 ### Requirement: 统一错误响应格式
 API SHALL返回统一的错误响应格式，包含错误代码、消息和详细信息。

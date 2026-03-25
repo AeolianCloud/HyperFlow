@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+定义通过磁盘导入创建虚拟机时的 CloudInit 扩展行为。
+
+## Requirements
 
 ### Requirement: 创建虚拟机时支持 CloudInit 配置
 系统 SHALL 在创建虚拟机请求体中接受可选的 CloudInit 配置参数；当请求体包含至少一个 CloudInit 字段时，系统 SHALL 向 PVE 请求附加 CloudInit 驱动盘及对应配置。新增 `ciUpgrade`、`ciPackages`、`snippetsStorage` 可选字段：当 `ciUpgrade=true` 且 `ciPackages` 为空时，传递 `ciupgrade=1`；当 `ciPackages` 非空时，生成 cloud-init user-data Snippet 文件并通过 `cicustom` 引用。

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow API 的统一错误响应格式和常见错误场景。
+
+## Requirements
 
 ### Requirement: API 错误响应格式
 所有 API 端点在返回错误时，响应体 SHALL 遵循微软 REST API Guidelines 的标准错误结构：顶层包含 `error` 对象，`error` 对象包含 `code`（PascalCase 机器可读错误码）和 `message`（人类可读说明）字段。

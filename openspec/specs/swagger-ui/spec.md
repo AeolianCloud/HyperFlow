@@ -1,3 +1,9 @@
+## Purpose
+
+定义 Hyperflow Swagger UI 的访问入口和文档展示完整性要求。
+
+## Requirements
+
 ### Requirement: Swagger UI 可访问
 服务 SHALL 在 `/swagger/index.html` 提供可交互的 Swagger UI 页面，展示所有已注册 API 的文档。
 

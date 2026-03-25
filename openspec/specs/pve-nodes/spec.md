@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow 对 PVE 节点资源的查询接口行为。
+
+## Requirements
 
 ### Requirement: 查询集群节点列表
 系统 SHALL 提供接口返回 PVE 集群中所有节点的列表及其基本状态信息（节点名、在线状态、CPU 使用率、内存使用率）。

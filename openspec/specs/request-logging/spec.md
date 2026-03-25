@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow 请求日志、PVE 调用日志、WebSocket 生命周期日志与 operation 状态日志的结构化记录要求。
+
+## Requirements
 
 ### Requirement: 请求 ID 生成与传递
 系统 SHALL 为每个入站 HTTP 请求生成唯一的 `request_id`（16 字节随机 hex 字符串），并将其存入 `gin.Context`，供整个请求处理链路使用。
