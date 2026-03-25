@@ -1,6 +1,6 @@
 ## Purpose
 
-定义 Hyperflow 请求日志、PVE 调用日志、WebSocket 生命周期日志与 operation 状态日志的结构化记录要求。
+定义 Hyperflow 请求日志、PVE 调用日志、operation 状态日志与 Kafka 发布日志的结构化记录要求。
 
 ## Requirements
 
@@ -12,7 +12,7 @@
 - **THEN** 系统 SHALL 生成唯一 `request_id` 并注入当前请求的 `gin.Context`
 
 #### Scenario: 同一请求的所有日志共享同一 ID
-- **WHEN** 一个请求触发多条日志（HTTP + PVE 调用 + Operation 变更）
+- **WHEN** 一个请求触发多条日志（HTTP + PVE 调用 + 后续 Operation 变更 / 事件发布）
 - **THEN** 所有日志记录的 `request_id` 字段 SHALL 相同
 
 ### Requirement: logs 数据库表
@@ -40,17 +40,6 @@
 - **WHEN** PVE API 返回非 2xx 或网络错误
 - **THEN** 系统 SHALL 写入 `level=ERROR` 的 `pve.call` 日志，message 包含错误详情
 
-### Requirement: WebSocket 连接生命周期日志
-系统 SHALL 在 WebSocket 连接建立时写入 `event=ws.connect` 日志，在连接关闭时写入 `event=ws.disconnect` 日志，均包含 `request_id` 和 `operation_id`。
-
-#### Scenario: WebSocket 连接建立
-- **WHEN** WebSocket 升级握手成功
-- **THEN** 系统 SHALL 写入 `event=ws.connect` 日志，包含 `request_id` 和 `operation_id`
-
-#### Scenario: WebSocket 连接关闭
-- **WHEN** WebSocket 连接因任意原因关闭（客户端断开、操作终态、错误）
-- **THEN** 系统 SHALL 写入 `event=ws.disconnect` 日志，包含 `request_id` 和 `operation_id`
-
 ### Requirement: Operation 状态变更日志
 系统 SHALL 在 Operation 状态从 Running 变为 Succeeded 或 Failed 时，使用该 Operation 的 `creator_request_id` 写入 `event=operation.change` 日志，包含 `operation_id`、新状态、以及错误信息（若失败）。
 
@@ -61,6 +50,17 @@
 #### Scenario: Operation 执行失败
 - **WHEN** Operation 状态更新为 Failed
 - **THEN** 系统 SHALL 以 `creator_request_id` 为 `request_id` 写入 `level=ERROR` 的 `operation.change` 日志，message 包含错误码和错误信息
+
+### Requirement: Kafka 操作事件发布日志
+系统 SHALL 在向 Kafka 发布 operation 终态事件时写入结构化日志，事件名为 `operation.event.publish`，并使用该 operation 的 `creator_request_id` 作为 `request_id` 关联字段。
+
+#### Scenario: 发布成功时写日志
+- **WHEN** 某个 operation 的终态事件被 Kafka 成功确认
+- **THEN** 系统 SHALL 写入 `level=INFO` 的 `operation.event.publish` 日志，包含 `request_id`、`operation_id` 和 topic 信息
+
+#### Scenario: 发布失败时写日志
+- **WHEN** 某个 operation 的终态事件发布到 Kafka 失败
+- **THEN** 系统 SHALL 写入 `level=ERROR` 的 `operation.event.publish` 日志，包含 `request_id`、`operation_id` 和错误详情
 
 ### Requirement: 异步写入不阻塞主链路
 日志写入 SHALL 通过 buffered channel 异步执行，主请求处理路径不等待数据库写入完成。channel 满时 SHALL 丢弃新日志条目并向 stderr 输出告警，不影响请求处理。

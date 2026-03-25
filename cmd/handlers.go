@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"hyperflow/internal/logger"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
@@ -70,7 +66,6 @@ var nodesSvcGlobal *pve.NodesService
 var vmsSvcGlobal *pve.VmsService
 var storageSvcGlobal *pve.StorageService
 var operationsSvcGlobal *operations.Service
-var requestLoggerGlobal logger.Logger
 
 // listNodes godoc
 // @Summary      列出所有节点
@@ -166,6 +161,7 @@ func getVm(c *gin.Context) {
 // @Param        node  path  string  true  "节点名称"
 // @Param        vmid  path  string  true  "虚拟机 ID"
 // @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      409  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
@@ -180,8 +176,11 @@ func startVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var upid string
-	json.Unmarshal(data, &upid)
+	upid, err := decodeUPID(data)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
+		return
+	}
 	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
@@ -199,6 +198,7 @@ func startVm(c *gin.Context) {
 // @Param        node  path  string  true  "节点名称"
 // @Param        vmid  path  string  true  "虚拟机 ID"
 // @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      409  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
@@ -213,8 +213,11 @@ func stopVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var upid string
-	json.Unmarshal(data, &upid)
+	upid, err := decodeUPID(data)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
+		return
+	}
 	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
@@ -232,6 +235,7 @@ func stopVm(c *gin.Context) {
 // @Param        node  path  string  true  "节点名称"
 // @Param        vmid  path  string  true  "虚拟机 ID"
 // @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
 // @Failure      404  {object}  ErrorResponse
 // @Failure      409  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
@@ -246,8 +250,11 @@ func deleteVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var upid string
-	json.Unmarshal(data, &upid)
+	upid, err := decodeUPID(data)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
+		return
+	}
 	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "")
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
@@ -270,6 +277,8 @@ func deleteVm(c *gin.Context) {
 // @Param        node  path  string               true  "节点名称"
 // @Param        body  body  pve.CreateVmRequest  true  "创建参数（vmid、cores、memory、diskSource、storage 为必填；name 为可选，不填时自动生成随机主机名；CloudInit 字段均为可选；ciPackages 非空时 snippetsStorage 必填）"
 // @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
+// @Header       202  {string}  Location            "/api/pve/nodes/{node}/vms/{vmid}"
 // @Failure      400  {object}  ErrorResponse
 // @Failure      404  {object}  ErrorResponse
 // @Failure      409  {object}  ErrorResponse
@@ -297,8 +306,11 @@ func createVm(c *gin.Context) {
 		handlePveError(c, err)
 		return
 	}
-	var upid string
-	json.Unmarshal(data, &upid)
+	upid, err := decodeUPID(data)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
+		return
+	}
 	vmLocation := "/api/pve/nodes/" + node + "/vms/" + fmt.Sprint(req.VMID)
 	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, vmLocation)
 	if err != nil {
@@ -328,26 +340,19 @@ func listStorage(c *gin.Context) {
 	respondOK(c, storages)
 }
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
-// watchOperation godoc
-// @Summary      通过 WebSocket 订阅操作状态
-// @Description  升级为 WebSocket 连接，服务端每隔 1s 推送操作状态消息。操作进入终态（Succeeded/Failed）后推送最终消息并以 code 1000 正常关闭连接。若操作 ID 不存在则返回 HTTP 404 拒绝升级。
+// getOperation godoc
+// @Summary      获取异步操作状态
+// @Description  返回指定异步操作的当前状态，遵循 Microsoft REST API Guidelines LRO 模式。
 // @Tags         operations
 // @Param        id  path  string  true  "操作 ID"
-// @Success      101  {string}  string  "Switching Protocols"
+// @Produce      json
+// @Success      200  {object}  OperationResponse
 // @Failure      404  {object}  ErrorResponse
 // @Failure      500  {object}  ErrorResponse
-// @Router       /operations/{id}/watch [get]
-func watchOperation(c *gin.Context) {
+// @Router       /operations/{id} [get]
+func getOperation(c *gin.Context) {
 	id := c.Param("id")
-	ctx := requestContextFromGin(c)
-	requestID := requestIDFromGin(c)
-
-	// 升级前校验操作存在性
-	op, err := operationsSvcGlobal.GetOperation(ctx, id)
+	op, err := operationsSvcGlobal.GetOperation(requestContextFromGin(c), id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -356,62 +361,7 @@ func watchOperation(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NotFound", "operation not found")
 		return
 	}
-
-	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		return
-	}
-	if requestLoggerGlobal != nil {
-		requestLoggerGlobal.Log(logger.Entry{
-			RequestID:   requestID,
-			Level:       "INFO",
-			Event:       "ws.connect",
-			OperationID: id,
-		})
-	}
-
-	wsCtx := context.WithValue(context.Background(), logger.RequestIDKey, requestID)
-	defer func() {
-		if requestLoggerGlobal != nil {
-			requestLoggerGlobal.Log(logger.Entry{
-				RequestID:   requestID,
-				Level:       "INFO",
-				Event:       "ws.disconnect",
-				OperationID: id,
-			})
-		}
-		_ = conn.Close()
-	}()
-
-	// 若操作已为终态，推送一条消息后立即关闭
-	if op.Status == "Succeeded" || op.Status == "Failed" {
-		resp := buildOperationResponse(op)
-		_ = conn.WriteJSON(resp)
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		return
-	}
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			current, err := operationsSvcGlobal.GetOperation(wsCtx, id)
-			if err != nil || current == nil {
-				return
-			}
-			resp := buildOperationResponse(current)
-			if err := conn.WriteJSON(resp); err != nil {
-				// 客户端已断开
-				return
-			}
-			if current.Status == "Succeeded" || current.Status == "Failed" {
-				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				return
-			}
-		}
-	}
+	respondOK(c, buildOperationResponse(op))
 }
 
 func buildOperationResponse(op *operations.Operation) OperationResponse {
@@ -424,6 +374,17 @@ func buildOperationResponse(op *operations.Operation) OperationResponse {
 		resp.Error = &OperationErrorBody{Code: op.ErrorCode, Message: op.ErrorMessage}
 	}
 	return resp
+}
+
+func decodeUPID(data []byte) (string, error) {
+	var upid string
+	if err := json.Unmarshal(data, &upid); err != nil {
+		return "", err
+	}
+	if upid == "" {
+		return "", fmt.Errorf("empty task id")
+	}
+	return upid, nil
 }
 
 // registerNodesRoutes 注册节点路由
@@ -453,5 +414,5 @@ func registerStorageRoutes(rg *gin.RouterGroup, svc *pve.StorageService) {
 // registerOperationsRoutes 注册操作路由
 func registerOperationsRoutes(rg *gin.RouterGroup, svc *operations.Service) {
 	operationsSvcGlobal = svc
-	rg.GET("/:id/watch", watchOperation)
+	rg.GET("/:id", getOperation)
 }

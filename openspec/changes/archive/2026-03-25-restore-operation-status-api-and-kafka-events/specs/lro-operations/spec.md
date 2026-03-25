@@ -1,19 +1,4 @@
-## Purpose
-
-定义 Hyperflow 长时间运行操作的持久化、查询与后台状态推进行为。
-
-## Requirements
-
-### Requirement: Operation 记录创建者请求 ID
-Operation 记录 SHALL 存储 `creator_request_id` 字段，在 `CreateOperation` 时从调用方的 `context.Context` 中读取并持久化到数据库。该字段用于将 Operation 生命周期内的所有日志归属到创建该 Operation 的原始请求。
-
-#### Scenario: 创建 Operation 时记录 request_id
-- **WHEN** `CreateOperation` 被调用，且 context 中包含有效 `request_id`
-- **THEN** 新建的 Operation 记录 SHALL 包含该 `request_id` 作为 `creator_request_id`
-
-#### Scenario: 状态变更日志使用创建者 request_id
-- **WHEN** Operation 状态从 Running 变为 Succeeded 或 Failed
-- **THEN** 写入的日志条目 SHALL 使用 `creator_request_id`，而非触发查询的请求 ID
+## ADDED Requirements
 
 ### Requirement: 查询长时间运行操作状态
 系统 SHALL 提供 `GET /api/pve/operations/{id}` 端点返回异步操作的当前状态，遵循 Microsoft REST API Guidelines 的 LRO 模式，屏蔽底层 PVE task 标识细节。
@@ -48,3 +33,9 @@ Operation 记录 SHALL 存储 `creator_request_id` 字段，在 `CreateOperation
 #### Scenario: 服务重启后恢复跟踪
 - **WHEN** 服务启动时存在重启前遗留的 `Running` operations
 - **THEN** 系统 SHALL 恢复对这些 operation 的后台跟踪，直到进入终态
+
+## REMOVED Requirements
+
+### Requirement: 通过 WebSocket 订阅操作状态变更
+**Reason**: Hyperflow 不再提供浏览器导向的 operation WebSocket 订阅能力；实时状态传播改由 Kafka 事件供门户后端消费。
+**Migration**: 使用 `GET /api/pve/operations/{id}` 查询操作状态，并通过门户后端消费 Kafka operation 事件获取实时通知。

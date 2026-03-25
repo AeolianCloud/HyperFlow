@@ -28,7 +28,7 @@ type Entry struct {
 	RequestID   string
 	Timestamp   time.Time
 	Level       string // INFO / WARN / ERROR
-	Event       string // http.request / pve.call / ws.connect / ws.disconnect / operation.change
+	Event       string // http.request / pve.call / operation.change / operation.event.publish
 	Method      string
 	Path        string
 	StatusCode  int

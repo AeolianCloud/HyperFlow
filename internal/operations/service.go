@@ -16,14 +16,15 @@ type TaskStatusQuerier interface {
 
 // Service 提供 LRO operation 的创建与查询逻辑
 type Service struct {
-	store     Store
-	querier   TaskStatusQuerier
-	logWriter logger.Logger
+	store      Store
+	querier    TaskStatusQuerier
+	logWriter  logger.Logger
+	eventTopic string
 }
 
 // NewService 创建 Service
-func NewService(store Store, querier TaskStatusQuerier, logWriter logger.Logger) *Service {
-	return &Service{store: store, querier: querier, logWriter: logWriter}
+func NewService(store Store, querier TaskStatusQuerier, logWriter logger.Logger, eventTopic string) *Service {
+	return &Service{store: store, querier: querier, logWriter: logWriter, eventTopic: eventTopic}
 }
 
 // CreateOperation 生成随机 ID，写入 DB，返回新建的 Operation
@@ -46,43 +47,79 @@ func (s *Service) CreateOperation(ctx context.Context, node, upid, resourceLocat
 	return op, nil
 }
 
-// GetOperation 懒查询：若操作仍为 Running，则查询 PVE 任务状态并按需更新 DB。
-// 返回 nil, nil 表示 ID 不存在。
+// GetOperation 返回持久化的 operation 状态；返回 nil, nil 表示 ID 不存在。
 func (s *Service) GetOperation(ctx context.Context, id string) (*Operation, error) {
 	op, err := s.store.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
-	if op == nil {
-		return nil, nil
-	}
-	if op.Status != "Running" {
+	if op == nil || op.Status != "Running" || s.querier == nil {
 		return op, nil
 	}
-	// 懒更新：查询 PVE 底层任务状态
-	pveStatus, pveExitStatus, err := s.querier.GetTaskStatus(contextOrBackground(ctx), op.PVENode, op.PVEUpid)
+
+	// 读时兜底推进一次状态，避免后台 reconciler 临时失效时长期停留在 Running。
+	if err := s.reconcileOperation(contextOrBackground(ctx), op); err != nil {
+		return nil, err
+	}
+
+	return s.store.GetByID(id)
+}
+
+// ReconcileRunningOperations 扫描 Running operations，并在底层任务进入终态时推进状态并写入 outbox。
+func (s *Service) ReconcileRunningOperations(ctx context.Context, limit int) error {
+	if s.querier == nil {
+		return fmt.Errorf("task status querier is not configured")
+	}
+
+	ops, err := s.store.ListRunning(limit)
 	if err != nil {
-		// PVE 不可达时返回当前缓存状态，不报错
-		return op, nil
+		return fmt.Errorf("failed to list running operations: %w", err)
 	}
-	if pveStatus == "stopped" {
-		var newStatus, errCode, errMsg string
-		if pveExitStatus == "OK" {
-			newStatus = "Succeeded"
-		} else {
-			newStatus = "Failed"
-			errCode = "TaskFailed"
-			errMsg = pveExitStatus
+
+	var firstErr error
+	for _, op := range ops {
+		if err := s.reconcileOperation(contextOrBackground(ctx), op); err != nil && firstErr == nil {
+			firstErr = err
 		}
-		if err := s.store.UpdateStatus(id, newStatus, errCode, errMsg); err != nil {
-			return nil, fmt.Errorf("failed to update operation status: %w", err)
-		}
-		op.Status = newStatus
-		op.ErrorCode = errCode
-		op.ErrorMessage = errMsg
-		s.logStatusChange(op)
 	}
-	return op, nil
+	return firstErr
+}
+
+func (s *Service) reconcileOperation(ctx context.Context, op *Operation) error {
+	pveStatus, pveExitStatus, err := s.querier.GetTaskStatus(ctx, op.PVENode, op.PVEUpid)
+	if err != nil {
+		return nil
+	}
+	if pveStatus != "stopped" {
+		return nil
+	}
+
+	terminal := *op
+	if pveExitStatus == "OK" {
+		terminal.Status = "Succeeded"
+		terminal.ErrorCode = ""
+		terminal.ErrorMessage = ""
+	} else {
+		terminal.Status = "Failed"
+		terminal.ErrorCode = "TaskFailed"
+		terminal.ErrorMessage = pveExitStatus
+	}
+
+	event, err := NewOutboxEvent(&terminal, s.eventTopic)
+	if err != nil {
+		return fmt.Errorf("failed to build outbox event for operation %s: %w", op.ID, err)
+	}
+
+	applied, err := s.store.CompleteOperation(&terminal, event)
+	if err != nil {
+		return fmt.Errorf("failed to complete operation %s: %w", op.ID, err)
+	}
+	if !applied {
+		return nil
+	}
+
+	s.logStatusChange(&terminal)
+	return nil
 }
 
 func generateID() (string, error) {
