@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+定义 Hyperflow 对 PVE 虚拟机资源的查询、创建和生命周期操作行为。
+
+## Requirements
 
 ### Requirement: 新建虚拟机（含 ciPackages）
 当请求包含 `ciPackages` 时，系统 SHALL 生成包含 `hostname`、`fqdn` 和 `preserve_hostname: false` 字段的 cloud-init user-data YAML，确保虚拟机首次开机后主机名与虚拟机 `name` 一致。
@@ -10,8 +14,6 @@
 #### Scenario: ciPackages 为空时行为不变
 - **WHEN** 客户端发送 `POST /api/pve/nodes/:node/vms`，且 `ciPackages` 为空
 - **THEN** 系统 SHALL 使用 PVE 原生 CloudInit 参数，不生成自定义 user-data，行为与修改前一致
-
-## ADDED Requirements
 
 ### Requirement: 查询节点上的虚拟机列表
 系统 SHALL 提供接口返回指定节点上所有 QEMU/KVM 虚拟机的列表，包含 VMID、名称、状态、CPU、内存信息。

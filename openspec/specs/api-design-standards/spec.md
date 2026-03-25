@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow API 的通用设计约束，包括资源命名、HTTP 方法、状态码和版本控制。
+
+## Requirements
 
 ### Requirement: 资源命名规范
 API资源路径SHALL使用复数名词，采用kebab-case命名风格，清晰表达资源类型。

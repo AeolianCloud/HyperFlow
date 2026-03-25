@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义创建虚拟机时通过 CloudInit 完成首次开机升级和软件包安装的行为。
+
+## Requirements
 
 ### Requirement: 创建虚拟机时支持首次开机软件包更新
 系统 SHALL 在 `CreateVmRequest` 中接受可选的 `ciUpgrade` 布尔字段；当 `ciUpgrade` 为 `true` 且未指定 `ciPackages` 时，系统 SHALL 向 PVE 传递 `ciupgrade=1` 参数，触发首次开机执行完整软件包更新。

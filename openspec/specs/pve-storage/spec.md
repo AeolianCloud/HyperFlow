@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow 对 PVE 存储资源的查询接口行为。
+
+## Requirements
 
 ### Requirement: 查询存储池列表
 系统 SHALL 提供接口返回 PVE 集群中所有存储池的列表，包含存储名称、类型、总容量、已用容量、可用容量及状态。

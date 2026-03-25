@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow 通过 WebSocket 订阅单个异步操作状态变更的行为。
+
+## Requirements
 
 ### Requirement: 通过 WebSocket 订阅操作状态变更
 系统 SHALL 提供 WebSocket 端点，客户端连接后服务端周期性查询操作状态并推送事件；操作进入终态后服务端推送最终状态并主动关闭连接。

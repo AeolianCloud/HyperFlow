@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow API 文档的内容完整性、生成方式、交互性和可访问性要求。
+
+## Requirements
 
 ### Requirement: OpenAPI规范支持
 API文档SHALL使用OpenAPI 3.0+规范格式，确保标准化和工具兼容性。

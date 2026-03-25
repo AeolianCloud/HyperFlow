@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow 长时间运行操作的持久化、查询与 WebSocket 状态订阅行为。
+
+## Requirements
 
 ### Requirement: Operation 记录创建者请求 ID
 Operation 记录 SHALL 存储 `creator_request_id` 字段，在 `CreateOperation` 时从调用方的 `context.Context` 中读取并持久化到数据库。该字段用于将 Operation 生命周期内的所有日志归属到创建该 Operation 的原始请求。

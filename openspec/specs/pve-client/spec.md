@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+定义 Hyperflow PVE client 的认证、连接配置、context 传递和错误处理行为。
+
+## Requirements
 
 ### Requirement: PVE API Token 认证
 PveClient SHALL 使用 API Token 方式对 PVE REST API 进行认证，认证头格式为 `Authorization: PVEAPIToken=<tokenid>=<secret>`。Token 信息 SHALL 从环境变量 `PVE_TOKEN_ID` 和 `PVE_TOKEN_SECRET` 读取。所有公开方法 SHALL 接受 `context.Context` 作为第一个参数，并将其传递至底层 HTTP 调用。
