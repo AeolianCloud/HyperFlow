@@ -277,6 +277,7 @@ func deleteVm(c *gin.Context) {
 // @Description  支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；
 // @Description  当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。
 // @Description  ciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。
+// @Description  支持可选的数据盘配置 dataDisks，每块数据盘需指定 size（GB）和 storage（存储池名称），自动分配 scsi 接口名。
 // @Description  成功后响应 Operation-Location 及 Location 头。
 // @Tags         vms
 // @Accept       json
@@ -303,6 +304,12 @@ func createVm(c *gin.Context) {
 	if req.VMID == 0 || req.Cores == 0 || req.Memory == 0 || req.DiskSource == "" || req.Storage == "" {
 		respondError(c, http.StatusBadRequest, "BadRequest", "vmid, cores, memory, diskSource and storage are required")
 		return
+	}
+	for i, dd := range req.DataDisks {
+		if dd.Size <= 0 || dd.Storage == "" {
+			respondError(c, http.StatusBadRequest, "BadRequest", fmt.Sprintf("dataDisks[%d]: size and storage are required", i))
+			return
+		}
 	}
 	if len(req.CIPackages) > 0 && req.SnippetsStorage == "" {
 		respondError(c, http.StatusBadRequest, "BadRequest", "snippetsStorage is required when ciPackages is specified")
@@ -376,6 +383,160 @@ func createVm(c *gin.Context) {
 	}
 	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
 	c.Header("Location", vmLocation)
+	c.Status(http.StatusAccepted)
+}
+
+// listVmDisks godoc
+// @Summary      列出虚拟机磁盘
+// @Description  返回指定虚拟机的所有磁盘列表
+// @Tags         vms
+// @Produce      json
+// @Param        node  path  string  true  "节点名称"
+// @Param        vmid  path  string  true  "虚拟机 ID"
+// @Success      200  {array}  pve.VmDisk
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
+// @Router       /nodes/{node}/vms/{vmid}/disks [get]
+func listVmDisks(c *gin.Context) {
+	node := c.Param("node")
+	vmid := c.Param("vmid")
+	ctx := requestContextFromGin(c)
+
+	data, err := vmsSvcGlobal.GetVmConfig(ctx, node, vmid)
+	if err != nil {
+		handlePveError(c, err)
+		return
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", "failed to parse VM config")
+		return
+	}
+	disks := pve.ParseSCSIDisks(config)
+	respondOK(c, disks)
+}
+
+// attachVmDisk godoc
+// @Summary      挂载数据盘
+// @Description  给指定虚拟机挂载一块新的空数据盘，支持热插拔。自动分配下一个可用的 scsi 接口名。
+// @Tags         vms
+// @Accept       json
+// @Produce      json
+// @Param        node  path  string                true  "节点名称"
+// @Param        vmid  path  string                true  "虚拟机 ID"
+// @Param        body  body  pve.AttachDiskRequest true  "挂载参数（size 和 storage 为必填）"
+// @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
+// @Failure      400  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
+// @Router       /nodes/{node}/vms/{vmid}/disks [post]
+func attachVmDisk(c *gin.Context) {
+	node := c.Param("node")
+	vmid := c.Param("vmid")
+	ctx := requestContextFromGin(c)
+
+	var req pve.AttachDiskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
+		return
+	}
+	if req.Size <= 0 || req.Storage == "" {
+		respondError(c, http.StatusBadRequest, "BadRequest", "size and storage are required")
+		return
+	}
+
+	release, err := operationsSvcGlobal.AcquireDiskLock(ctx, node, vmid)
+	if err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	defer release()
+
+	data, err := vmsSvcGlobal.GetVmConfig(ctx, node, vmid)
+	if err != nil {
+		handlePveError(c, err)
+		return
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", "failed to parse VM config")
+		return
+	}
+	nextIdx := pve.NextSCSIIndex(config)
+	diskKey := fmt.Sprintf("scsi%d", nextIdx)
+	update := map[string]any{diskKey: fmt.Sprintf("%s:%d", req.Storage, req.Size)}
+
+	pveData, err := vmsSvcGlobal.UpdateVmConfig(ctx, node, vmid, update)
+	if err != nil {
+		handlePveError(c, err)
+		return
+	}
+
+	upid, decodeErr := decodeUPID(pveData)
+	if decodeErr != nil {
+		upid = ""
+	}
+	resourceLoc := "/api/pve/nodes/" + node + "/vms/" + vmid
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, resourceLoc, nil, nil)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
+	c.Status(http.StatusAccepted)
+}
+
+// detachVmDisk godoc
+// @Summary      卸载/删除数据盘
+// @Description  从虚拟机卸载指定数据盘。不带 purge 参数时仅从配置移除，保留存储卷；带 ?purge=true 时同时销毁存储卷。
+// @Tags         vms
+// @Produce      json
+// @Param        node    path  string  true  "节点名称"
+// @Param        vmid    path  string  true  "虚拟机 ID"
+// @Param        diskId  path  string  true  "磁盘接口名，如 scsi1"
+// @Param        purge   query bool    false "是否同时销毁存储卷"
+// @Success      202
+// @Header       202  {string}  Operation-Location  "/api/pve/operations/{id}"
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
+// @Router       /nodes/{node}/vms/{vmid}/disks/{diskId} [delete]
+func detachVmDisk(c *gin.Context) {
+	node := c.Param("node")
+	vmid := c.Param("vmid")
+	diskId := c.Param("diskId")
+	purge := c.Query("purge") == "true"
+	ctx := requestContextFromGin(c)
+
+	release, err := operationsSvcGlobal.AcquireDiskLock(ctx, node, vmid)
+	if err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	defer release()
+
+	pveData, err := vmsSvcGlobal.UnlinkDisk(ctx, node, vmid, diskId, purge)
+	if err != nil {
+		handlePveError(c, err)
+		return
+	}
+
+	upid, decodeErr := decodeUPID(pveData)
+	if decodeErr != nil {
+		upid = ""
+	}
+	resourceLoc := "/api/pve/nodes/" + node + "/vms/" + vmid
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, resourceLoc, nil, nil)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	c.Header("Operation-Location", "/api/pve/operations/"+op.ID)
 	c.Status(http.StatusAccepted)
 }
 
@@ -460,6 +621,9 @@ func registerVmsRoutes(rg *gin.RouterGroup, svc *pve.VmsService) {
 	rg.POST("/:vmid/start", startVm)
 	rg.POST("/:vmid/stop", stopVm)
 	rg.DELETE("/:vmid", deleteVm)
+	rg.GET("/:vmid/disks", listVmDisks)
+	rg.POST("/:vmid/disks", attachVmDisk)
+	rg.DELETE("/:vmid/disks/:diskId", detachVmDisk)
 }
 
 // registerStorageRoutes 注册存储路由

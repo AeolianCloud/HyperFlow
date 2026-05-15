@@ -155,6 +155,17 @@ func (s *Service) logStatusChange(op *Operation) {
 	})
 }
 
+// AcquireDiskLock 获取指定 VM 的磁盘操作锁。返回的释放函数 MUST 在操作完成后调用。
+// 释放函数可安全多次调用（幂等）。
+func (s *Service) AcquireDiskLock(ctx context.Context, node, vmid string) (func(), error) {
+	name := "disk_ops:" + node + "/" + vmid
+	release, err := s.store.AcquireLock(ctx, name, 5)
+	if err != nil {
+		return nil, err
+	}
+	return release, nil
+}
+
 // contextOrBackground 兜底 nil context，避免底层调用使用空 context 触发 panic。
 func contextOrBackground(ctx context.Context) context.Context {
 	if ctx == nil {

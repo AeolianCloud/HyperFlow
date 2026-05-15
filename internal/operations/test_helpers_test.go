@@ -135,6 +135,10 @@ func (s *fakeStore) MarkEventPublished(id string) error {
 	return nil
 }
 
+func (s *fakeStore) AcquireLock(ctx context.Context, name string, timeout int) (func(), error) {
+	return func() {}, nil
+}
+
 func (s *fakeStore) MarkEventPublishFailed(id, lastError string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
