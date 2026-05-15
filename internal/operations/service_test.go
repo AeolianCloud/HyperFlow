@@ -90,6 +90,76 @@ func TestServiceReconcileRunningOperationsHandlesFailedTask(t *testing.T) {
 	}
 }
 
+func TestServiceReconcileRunningOperationWithAllocationID(t *testing.T) {
+	store := newFakeStore()
+	allocationID := "alloc-1"
+	vmid := 100
+	store.ops["op-4"] = &Operation{
+		ID:               "op-4",
+		Status:           "Running",
+		PVENode:          "node-a",
+		PVEUpid:          "UPID:node-a:4",
+		ResourceLocation: "/api/pve/nodes/node-a/vms/100",
+		CreatorRequestID: "req-4",
+		VMID:             &vmid,
+		AllocationID:     &allocationID,
+	}
+	service := NewService(store, fakeQuerier{status: "stopped", exitStatus: "OK"}, &captureLogger{}, "hyperflow.operation-events")
+
+	if err := service.ReconcileRunningOperations(context.Background(), 10); err != nil {
+		t.Fatalf("ReconcileRunningOperations returned error: %v", err)
+	}
+
+	op, err := store.GetByID("op-4")
+	if err != nil {
+		t.Fatalf("GetByID returned error: %v", err)
+	}
+	if op == nil || op.Status != "Succeeded" {
+		t.Fatalf("expected operation to be succeeded, got %#v", op)
+	}
+	if op.VMID == nil || *op.VMID != 100 {
+		t.Fatalf("expected vmid 100, got %v", op.VMID)
+	}
+	if op.AllocationID == nil || *op.AllocationID != "alloc-1" {
+		t.Fatalf("expected allocationID alloc-1, got %v", op.AllocationID)
+	}
+}
+
+func TestServiceReconcileRunningOperationWithAllocationID_Failed(t *testing.T) {
+	store := newFakeStore()
+	allocationID := "alloc-2"
+	vmid := 200
+	store.ops["op-5"] = &Operation{
+		ID:               "op-5",
+		Status:           "Running",
+		PVENode:          "node-b",
+		PVEUpid:          "UPID:node-b:5",
+		ResourceLocation: "/api/pve/nodes/node-b/vms/200",
+		CreatorRequestID: "req-5",
+		VMID:             &vmid,
+		AllocationID:     &allocationID,
+	}
+	service := NewService(store, fakeQuerier{status: "stopped", exitStatus: "disk full"}, &captureLogger{}, "hyperflow.operation-events")
+
+	if err := service.ReconcileRunningOperations(context.Background(), 10); err != nil {
+		t.Fatalf("ReconcileRunningOperations returned error: %v", err)
+	}
+
+	op, err := store.GetByID("op-5")
+	if err != nil {
+		t.Fatalf("GetByID returned error: %v", err)
+	}
+	if op == nil || op.Status != "Failed" {
+		t.Fatalf("expected operation to be failed, got %#v", op)
+	}
+	if op.VMID == nil || *op.VMID != 200 {
+		t.Fatalf("expected vmid 200, got %v", op.VMID)
+	}
+	if op.AllocationID == nil || *op.AllocationID != "alloc-2" {
+		t.Fatalf("expected allocationID alloc-2, got %v", op.AllocationID)
+	}
+}
+
 func TestServiceGetOperationReconcilesRunningOperationOnRead(t *testing.T) {
 	store := newFakeStore()
 	store.ops["op-3"] = &Operation{

@@ -88,6 +88,10 @@ type CreateVmRequest struct {
 	DiskFormat    string `json:"diskFormat,omitempty" example:"qcow2"`                                // 源磁盘格式，如 qcow2/raw（可选）
 	Storage       string `json:"storage" example:"local-lvm"`                                         // 目标存储池（必填）
 	Network       string `json:"network,omitempty" example:"virtio,bridge=vmbr0"`                     // 网络设备配置，格式同 PVE net0，默认 virtio,bridge=vmbr0（可选）
+	// IP 池配置（可选，使用 IP 池时自动分配地址并填充 CloudInit 参数）
+	IPPoolID    string `json:"ipPoolId,omitempty" example:"pool-abc123"`               // IP 池 ID（可选）
+	IPAddress   string `json:"ipAddress,omitempty" example:"10.0.0.10"`                // 指定分配的 IP 地址（可选，不指定时随机分配）
+	AutoAssign  *bool  `json:"autoAssignIp,omitempty" example:"true"`                  // 是否自动分配 IP（ipPoolId 非空且未指定 ipAddress 时默认为 true）
 	// CloudInit 配置（可选，使用云镜像时配置首次启动参数）
 	CIUser          string   `json:"ciUser,omitempty" example:"ubuntu"`                                // CloudInit 登录用户名（可选）
 	CIPassword      string   `json:"ciPassword,omitempty" example:"secret"`                            // CloudInit 登录密码（可选）

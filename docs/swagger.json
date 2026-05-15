@@ -589,6 +589,11 @@
                     "type": "string",
                     "example": "http://mirrors.aliyun.com/ubuntu"
                 },
+                "autoAssignIp": {
+                    "description": "是否自动分配 IP（ipPoolId 非空且未指定 ipAddress 时默认为 true）",
+                    "type": "boolean",
+                    "example": true
+                },
                 "ciPackages": {
                     "description": "CloudInit 首次开机需安装的软件包列表（可选；非空时须同时指定 snippetsStorage）",
                     "type": "array",
@@ -629,10 +634,20 @@
                     "type": "string",
                     "example": "local:import/noble-server-cloudimg-amd64.qcow2"
                 },
+                "ipAddress": {
+                    "description": "指定分配的 IP 地址（可选，不指定时随机分配）",
+                    "type": "string",
+                    "example": "10.0.0.10"
+                },
                 "ipConfig0": {
                     "description": "CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）",
                     "type": "string",
                     "example": "ip=192.168.1.100/24,gw=192.168.1.1"
+                },
+                "ipPoolId": {
+                    "description": "IP 池配置（可选，使用 IP 池时自动分配地址并填充 CloudInit 参数）",
+                    "type": "string",
+                    "example": "pool-abc123"
                 },
                 "memory": {
                     "description": "内存大小，单位 MB（必填）",

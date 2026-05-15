@@ -1,34 +1,62 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
-`cmd/` contains the HTTP entrypoint, route registration, request logging, and Swagger annotations. Core logic lives under `internal/`: `pve/` wraps Proxmox VE access, `operations/` persists async operation state, `logger/` writes request logs, and `timeutil/` centralizes Shanghai time handling. `docs/` holds generated Swagger artifacts plus API standards, `templates/` stores documentation templates, and `openspec/` tracks proposal/spec/design/task artifacts for spec-driven changes. `bin/` is the local build output directory.
+## Project Structure
 
-## Build, Test, and Development Commands
-Use Go’s standard toolchain:
+```
+cmd/            — Go entrypoint (main.go), Gin routes, handlers, swagger annotations
+internal/
+  pve/          — Proxmox VE API client + nodes/vms/storage services
+  operations/   — async LRO operations store (MySQL) + outbox event publisher (Kafka)
+  logger/       — async MySQL request log writer
+  timeutil/     — fixed Asia/Shanghai timezone
+docs/           — generated Swagger (don't hand-edit)
+openspec/       — spec-driven proposal/design/task artifacts
+bin/            — local build output
+```
 
-- `cp .env.example .env` to create local configuration for PVE and MySQL.
-- `go run ./cmd` to start the API locally on `:8080`.
-- `go build -v ./...` to compile all packages exactly as CI does.
-- `go build -o bin/hyperflow ./cmd` to produce the local binary.
-- `go test -v ./...` to run the full test suite.
-- `swag init -g cmd/main.go` after changing handlers, request/response models, or Swagger annotations.
+## Commands
 
-## Coding Style & Naming Conventions
-Follow standard Go formatting with `gofmt`; use tabs, lowercase package names, and exported identifiers only where cross-package access is needed. Keep transport concerns in `cmd/` and domain/service code in `internal/`. Do not hand-edit generated Swagger files such as `docs/docs.go`. For API work, keep success responses unwrapped, return errors as `{"error": ...}`, and preserve async `202` flows with `Operation-Location` headers.
+| Action | Command |
+|---|---|
+| Serve | `go run ./cmd` (port 8080) |
+| Build all | `go build -v ./...` |
+| Build binary | `go build -o bin/hyperflow ./cmd` |
+| Test all | `go test -v ./...` |
+| Test single | `go test -v ./internal/operations/...` |
+| Regenerate Swagger | `swag init -g cmd/main.go` (install: `go install github.com/swaggo/swag/cmd/swag@latest`) |
+| Config | `cp .env.example .env` |
 
-## Testing Guidelines
-The repository currently has no committed `_test.go` files, so new work should add tests alongside the package it changes, for example `internal/pve/vms_test.go`. Prefer table-driven tests for handlers, request validation, and failure paths around MySQL or PVE calls. Before opening a PR, run `go test -v ./...` and `go build -v ./...`.
+CI order: `go build -v ./...` → `go test -v ./...`
 
-## Commit & Pull Request Guidelines
-Recent history follows Conventional Commit prefixes such as `feat:` and `fix:`; keep subjects short and imperative. Pull requests should summarize behavior changes, link the related issue or OpenSpec change, and call out any config, schema, or generated-doc updates. If an API changes, include a Swagger screenshot or a sample request/response and commit regenerated files under `docs/`.
+## Required Env
 
-## Security & Workflow Notes
-Never commit real values from `.env`; only update `.env.example`. For scoped feature work, record the change under `openspec/changes/` and keep proposal, design, and task files in sync with implementation.
+`PVE_HOST`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `MYSQL_DSN`, `KAFKA_BROKERS`, `KAFKA_OPERATION_EVENTS_TOPIC`
 
-## API设计规范
-- 严格按照定义实现API
-- 遵循 Microsoft REST API Guidelines（https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md）
-- 每次修改增加或删除接口或者相关文件必须补全完整注释，不得影响swag文档阅读
-- 成功响应直接返回资源对象，不使用 `{"data": ...}` 包装层
-- 异步操作返回 202 + `Operation-Location` header，不直接暴露底层任务 ID
-- 错误响应统一格式：`{"error": {"code": "PascalCase", "message": "..."}}`
+Optional: `PVE_INSECURE` (skip SSL verify), `PVE_SNIPPETS_WEBDAV_URL` / `WEBDAV_USER` / `WEBDAV_PASSWORD` (cloud-init snippet upload)
+
+`.env` loading is lenient (godotenv, missing file ignored).  
+`MYSQL_DSN` is auto-normalized: forced `parseTime=true`, `time_zone='+08:00'`, `Loc=Asia/Shanghai`.
+
+## Architecture
+
+- **Gin** on `:8080`, all routes under `/api/pve`, Swagger at `/swagger/*any`
+- **PVE Client**: API Token auth (`PVEAPIToken=...`), auto-unwraps `{"data": ...}`, logs every call as `pve.call` to MySQL
+- **Operations outbox**: `Reconciler` polls PVE task status → updates MySQL + writes `operation_events_outbox`; `OutboxPublisher` drains outbox → Kafka. Both are background goroutines with graceful shutdown
+- **Time**: always `Asia/Shanghai` via `timeutil` package
+- **Responses**: success unwrapped (no `{"data": ...}`), error `{"error": {"code":"PascalCase","message":"..."}}`
+- **Async**: 202 + `Operation-Location` header
+- **Graceful shutdown** order: cancel app context → HTTP Shutdown → drain Reconciler + OutboxPublisher → drain MySQLLogger
+- **request_id** (32 hex chars) generated per request, propagated via `requestContextFromGin()` into context; operation IDs are 16 hex chars
+
+## Testing
+
+Tests use in-memory fakes (`fakeStore`, `captureLogger`, `fakeProducer`, `fakeQuerier`) — no MySQL/PVE/Kafka needed. Prefer table-driven tests. Test files: `cmd/handlers_test.go`, `internal/operations/*_test.go`.
+
+## Conventions
+
+- Standard Go: `gofmt`, tabs, lowercased packages, exported only when cross-package
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`
+- Transport in `cmd/`, domain in `internal/`
+- Never hand-edit `docs/docs.go`, `swagger.json`, `swagger.yaml`
+- Never commit real `.env` values
+- OpenSpec changes under `openspec/changes/`; archive with date prefix

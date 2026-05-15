@@ -22,6 +22,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	_ "hyperflow/docs"
+	"hyperflow/internal/ippool"
 	"hyperflow/internal/logger"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
@@ -84,6 +85,14 @@ func main() {
 	reconciler := operations.NewReconciler(operationsSvc, time.Second, 100)
 	outboxPublisher := operations.NewOutboxPublisher(store, kafkaProducer, logWriter, time.Second, 100)
 
+	ippoolStore := ippool.NewMySQLStore(db)
+	ippoolSvc := ippool.NewService(ippoolStore)
+
+	// 启动时清理孤儿 reserved IP
+	if err := releaseOrphanReservedIPs(db); err != nil {
+		log.Printf("warning: failed to clean orphan reserved IPs: %v", err)
+	}
+
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
@@ -100,6 +109,8 @@ func main() {
 		registerStorageRoutes(apipve.Group("/storage"), storageSvc)
 
 		registerOperationsRoutes(apipve.Group("/operations"), operationsSvc)
+
+		registerIPPoolRoutes(apipve.Group("/ip-pools"), ippoolSvc)
 	}
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -140,4 +151,15 @@ func main() {
 	logDrainCtx, logDrainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer logDrainCancel()
 	logWriter.Shutdown(logDrainCtx)
+}
+
+// releaseOrphanReservedIPs 启动时清理孤儿 reserved IP
+func releaseOrphanReservedIPs(db *sql.DB) error {
+	_, err := db.Exec(
+		`UPDATE ip_pool_addresses a
+		 LEFT JOIN operations o ON o.allocation_id = a.id
+		 SET a.status = 'available', a.vm_id = NULL, a.updated_at = NOW()
+		 WHERE a.status = 'reserved' AND o.id IS NULL`,
+	)
+	return err
 }
