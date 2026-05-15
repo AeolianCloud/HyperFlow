@@ -28,7 +28,7 @@ func NewService(store Store, querier TaskStatusQuerier, logWriter logger.Logger,
 }
 
 // CreateOperation 生成随机 ID，写入 DB，返回新建的 Operation
-func (s *Service) CreateOperation(ctx context.Context, node, upid, resourceLocation string) (*Operation, error) {
+func (s *Service) CreateOperation(ctx context.Context, node, upid, resourceLocation string, vmid *int, allocationID *string) (*Operation, error) {
 	id, err := generateID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate operation id: %w", err)
@@ -40,6 +40,8 @@ func (s *Service) CreateOperation(ctx context.Context, node, upid, resourceLocat
 		PVEUpid:          upid,
 		ResourceLocation: resourceLocation,
 		CreatorRequestID: logger.RequestIDFromContext(contextOrBackground(ctx)),
+		VMID:             vmid,
+		AllocationID:     allocationID,
 	}
 	if err := s.store.Insert(op); err != nil {
 		return nil, fmt.Errorf("failed to persist operation: %w", err)

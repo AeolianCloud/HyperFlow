@@ -36,6 +36,10 @@ definitions:
         description: APT 镜像源地址，写入 cloud-init apt.primary（可选，仅 ciPackages 非空时生效）
         example: http://mirrors.aliyun.com/ubuntu
         type: string
+      autoAssignIp:
+        description: 是否自动分配 IP（ipPoolId 非空且未指定 ipAddress 时默认为 true）
+        example: true
+        type: boolean
       ciPackages:
         description: CloudInit 首次开机需安装的软件包列表（可选；非空时须同时指定 snippetsStorage）
         example:
@@ -67,9 +71,17 @@ definitions:
         description: 导入磁盘来源，格式 storage:path（必填）
         example: local:import/noble-server-cloudimg-amd64.qcow2
         type: string
+      ipAddress:
+        description: 指定分配的 IP 地址（可选，不指定时随机分配）
+        example: 10.0.0.10
+        type: string
       ipConfig0:
         description: CloudInit 网络配置，格式同 PVE ipconfig0，如 ip=dhcp（可选）
         example: ip=192.168.1.100/24,gw=192.168.1.1
+        type: string
+      ipPoolId:
+        description: IP 池配置（可选，使用 IP 池时自动分配地址并填充 CloudInit 参数）
+        example: pool-abc123
         type: string
       memory:
         description: 内存大小，单位 MB（必填）

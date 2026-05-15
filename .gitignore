@@ -1,1 +1,5 @@
 .env
+.claude
+.codex
+.opencode
+.bin/Hyperflow

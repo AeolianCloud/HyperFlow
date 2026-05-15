@@ -20,6 +20,8 @@ type Operation struct {
 	CreatorRequestID string    `json:"-"`
 	CreatedAt        time.Time `json:"-"`
 	UpdatedAt        time.Time `json:"-"`
+	VMID             *int      `json:"vmid,omitempty"`
+	AllocationID     *string   `json:"allocationId,omitempty"`
 }
 
 // Store 定义 Operation 持久化接口
@@ -54,6 +56,8 @@ func (s *mysqlStore) CreateTable() error {
 		error_code         VARCHAR(64)  NOT NULL DEFAULT '',
 		error_message      TEXT         NOT NULL,
 		creator_request_id VARCHAR(32)  NULL,
+		vmid               INT          NULL,
+		allocation_id      VARCHAR(32)  NULL,
 		created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 	)`)
@@ -75,6 +79,46 @@ func (s *mysqlStore) CreateTable() error {
 		INDEX idx_operation_events_outbox_pending (published_at, created_at),
 		INDEX idx_operation_events_outbox_operation_id (operation_id)
 	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS ip_pools (
+		id          VARCHAR(32)  NOT NULL PRIMARY KEY,
+		name        VARCHAR(128) NOT NULL,
+		gateway     VARCHAR(45)  NOT NULL,
+		netmask     INT          NOT NULL,
+		dns1        VARCHAR(45)  NULL,
+		dns2        VARCHAR(45)  NULL,
+		description TEXT         NULL,
+		created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_ip_pools_name (name)
+	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS ip_pool_nodes (
+		pool_id VARCHAR(32)  NOT NULL,
+		node    VARCHAR(128) NOT NULL,
+		PRIMARY KEY (pool_id, node)
+	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS ip_pool_addresses (
+		id         VARCHAR(32)  NOT NULL PRIMARY KEY,
+		pool_id    VARCHAR(32)  NOT NULL,
+		address    VARCHAR(45)  NOT NULL,
+		status     VARCHAR(16)  NOT NULL DEFAULT 'available',
+		vm_id      INT          NULL,
+		created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_ip_pool_addresses_address (address),
+		INDEX idx_ip_pool_addresses_pool_status (pool_id, status)
+	)`)
 	return err
 }
 
@@ -84,9 +128,14 @@ func (s *mysqlStore) Insert(op *Operation) error {
 	_, err := s.db.Exec(
 		`INSERT INTO operations (
 			id, status, pve_node, pve_upid, resource_location,
-			error_code, error_message, creator_request_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		op.ID, op.Status, op.PVENode, op.PVEUpid, op.ResourceLocation, op.ErrorCode, op.ErrorMessage, nullableString(op.CreatorRequestID), now, now,
+			error_code, error_message, creator_request_id,
+			vmid, allocation_id,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		op.ID, op.Status, op.PVENode, op.PVEUpid, op.ResourceLocation,
+		op.ErrorCode, op.ErrorMessage, nullableString(op.CreatorRequestID),
+		nullableInt(op.VMID), nullableStringPtr(op.AllocationID),
+		now, now,
 	)
 	return err
 }
@@ -94,11 +143,20 @@ func (s *mysqlStore) Insert(op *Operation) error {
 // GetByID 按 ID 查询 operation 记录，不存在时返回 nil, nil
 func (s *mysqlStore) GetByID(id string) (*Operation, error) {
 	row := s.db.QueryRow(
-		`SELECT id, status, pve_node, pve_upid, resource_location, error_code, error_message, creator_request_id, created_at, updated_at FROM operations WHERE id = ?`, id,
+		`SELECT id, status, pve_node, pve_upid, resource_location,
+		        error_code, error_message, creator_request_id,
+		        vmid, allocation_id,
+		        created_at, updated_at
+		 FROM operations WHERE id = ?`, id,
 	)
 	op := &Operation{}
 	var creatorRequestID sql.NullString
-	err := row.Scan(&op.ID, &op.Status, &op.PVENode, &op.PVEUpid, &op.ResourceLocation, &op.ErrorCode, &op.ErrorMessage, &creatorRequestID, &op.CreatedAt, &op.UpdatedAt)
+	var vmid sql.NullInt32
+	var allocationID sql.NullString
+	err := row.Scan(&op.ID, &op.Status, &op.PVENode, &op.PVEUpid, &op.ResourceLocation,
+		&op.ErrorCode, &op.ErrorMessage, &creatorRequestID,
+		&vmid, &allocationID,
+		&op.CreatedAt, &op.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -106,6 +164,13 @@ func (s *mysqlStore) GetByID(id string) (*Operation, error) {
 		return nil, err
 	}
 	op.CreatorRequestID = creatorRequestID.String
+	if vmid.Valid {
+		v := int(vmid.Int32)
+		op.VMID = &v
+	}
+	if allocationID.Valid {
+		op.AllocationID = &allocationID.String
+	}
 	op.CreatedAt = timeutil.InShanghai(op.CreatedAt)
 	op.UpdatedAt = timeutil.InShanghai(op.UpdatedAt)
 	return op, nil
@@ -118,7 +183,10 @@ func (s *mysqlStore) ListRunning(limit int) ([]*Operation, error) {
 	}
 
 	rows, err := s.db.Query(
-		`SELECT id, status, pve_node, pve_upid, resource_location, error_code, error_message, creator_request_id, created_at, updated_at
+		`SELECT id, status, pve_node, pve_upid, resource_location,
+		        error_code, error_message, creator_request_id,
+		        vmid, allocation_id,
+		        created_at, updated_at
 		 FROM operations
 		 WHERE status = 'Running'
 		 ORDER BY created_at ASC
@@ -145,6 +213,7 @@ func (s *mysqlStore) ListRunning(limit int) ([]*Operation, error) {
 }
 
 // CompleteOperation 仅在 operation 仍为 Running 时将其推进到终态，并同步写入 outbox 事件。
+// 若有关联的 IP 分配，同步更新 ip_pool_addresses 状态。
 func (s *mysqlStore) CompleteOperation(op *Operation, event *OutboxEvent) (bool, error) {
 	if op == nil {
 		return false, nil
@@ -176,6 +245,35 @@ func (s *mysqlStore) CompleteOperation(op *Operation, event *OutboxEvent) (bool,
 	}
 	if rowsAffected == 0 {
 		return false, nil
+	}
+
+	// IP 分配状态推进
+	if op.AllocationID != nil && *op.AllocationID != "" {
+		if op.Status == "Succeeded" {
+			_, err = tx.Exec(
+				`UPDATE ip_pool_addresses SET status = 'used', vm_id = ? WHERE id = ?`,
+				nullableInt(op.VMID), *op.AllocationID,
+			)
+		} else if op.Status == "Failed" {
+			_, err = tx.Exec(
+				`UPDATE ip_pool_addresses SET status = 'available', vm_id = NULL WHERE id = ?`,
+				*op.AllocationID,
+			)
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+
+	// VM 删除操作释放 IP
+	if op.Status == "Succeeded" && op.VMID != nil && (op.AllocationID == nil || *op.AllocationID == "") {
+		_, err = tx.Exec(
+			`UPDATE ip_pool_addresses SET status = 'available', vm_id = NULL WHERE vm_id = ?`,
+			*op.VMID,
+		)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	_, err = tx.Exec(
@@ -271,6 +369,20 @@ func nullableString(v string) any {
 	return v
 }
 
+func nullableStringPtr(v *string) any {
+	if v == nil || *v == "" {
+		return nil
+	}
+	return *v
+}
+
+func nullableInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
 func nullableTime(v *time.Time) any {
 	if v == nil {
 		return nil
@@ -281,6 +393,8 @@ func nullableTime(v *time.Time) any {
 func scanOperation(scanner interface{ Scan(dest ...any) error }) (*Operation, error) {
 	op := &Operation{}
 	var creatorRequestID sql.NullString
+	var vmid sql.NullInt32
+	var allocationID sql.NullString
 	err := scanner.Scan(
 		&op.ID,
 		&op.Status,
@@ -290,6 +404,8 @@ func scanOperation(scanner interface{ Scan(dest ...any) error }) (*Operation, er
 		&op.ErrorCode,
 		&op.ErrorMessage,
 		&creatorRequestID,
+		&vmid,
+		&allocationID,
 		&op.CreatedAt,
 		&op.UpdatedAt,
 	)
@@ -297,6 +413,13 @@ func scanOperation(scanner interface{ Scan(dest ...any) error }) (*Operation, er
 		return nil, err
 	}
 	op.CreatorRequestID = creatorRequestID.String
+	if vmid.Valid {
+		v := int(vmid.Int32)
+		op.VMID = &v
+	}
+	if allocationID.Valid {
+		op.AllocationID = &allocationID.String
+	}
 	op.CreatedAt = timeutil.InShanghai(op.CreatedAt)
 	op.UpdatedAt = timeutil.InShanghai(op.UpdatedAt)
 	return op, nil

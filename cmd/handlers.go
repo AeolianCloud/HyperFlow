@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"hyperflow/internal/ippool"
 	"hyperflow/internal/operations"
 	"hyperflow/internal/pve"
 )
@@ -66,6 +68,7 @@ var nodesSvcGlobal *pve.NodesService
 var vmsSvcGlobal *pve.VmsService
 var storageSvcGlobal *pve.StorageService
 var operationsSvcGlobal *operations.Service
+var ippoolSvcGlobal *ippool.Service
 
 // listNodes godoc
 // @Summary      列出所有节点
@@ -181,7 +184,7 @@ func startVm(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
 		return
 	}
-	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid, nil, nil)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -218,7 +221,7 @@ func stopVm(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
 		return
 	}
-	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "/api/pve/nodes/"+node+"/vms/"+vmid, nil, nil)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -255,7 +258,11 @@ func deleteVm(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
 		return
 	}
-	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "")
+	var vmidPtr *int
+	if v, parseErr := strconv.Atoi(vmid); parseErr == nil {
+		vmidPtr = &v
+	}
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, "", vmidPtr, nil)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -301,18 +308,68 @@ func createVm(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BadRequest", "snippetsStorage is required when ciPackages is specified")
 		return
 	}
+	vmidPtr := &req.VMID
+	var allocationIDPtr *string
+
+	if req.IPPoolID != "" {
+		pool, err := ippoolSvcGlobal.GetPoolForNode(req.IPPoolID, node)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "BadRequest", err.Error())
+			return
+		}
+
+		var allocated *ippool.Address
+		if req.IPAddress != "" {
+			allocated, err = ippoolSvcGlobal.AllocateAddress(req.IPPoolID, req.IPAddress, req.VMID)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+				return
+			}
+			if allocated == nil {
+				respondError(c, http.StatusConflict, "Conflict", "IP address "+req.IPAddress+" is not available in pool "+req.IPPoolID)
+				return
+			}
+		} else {
+			if req.AutoAssign != nil && !*req.AutoAssign {
+				respondError(c, http.StatusBadRequest, "BadRequest", "ipAddress required when autoAssignIp is false")
+				return
+			}
+			allocated, err = ippoolSvcGlobal.AllocateRandomAddress(req.IPPoolID, req.VMID)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+				return
+			}
+			if allocated == nil {
+				respondError(c, http.StatusConflict, "Conflict", "no available IP address in pool "+req.IPPoolID)
+				return
+			}
+		}
+
+		allocationIDPtr = &allocated.ID
+		req.IPConfig0 = fmt.Sprintf("ip=%s/%d,gw=%s", allocated.Address, pool.Netmask, pool.Gateway)
+		if pool.DNS1 != "" {
+			req.Nameserver = pool.DNS1
+		}
+	}
+
 	data, err := vmsSvcGlobal.CreateVm(ctx, node, req)
 	if err != nil {
+		if allocationIDPtr != nil {
+			_ = ippoolSvcGlobal.ReleaseAddressByVMID(req.VMID)
+		}
 		handlePveError(c, err)
 		return
 	}
 	upid, err := decodeUPID(data)
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "BadGateway", "invalid PVE task response: "+err.Error())
+		if allocationIDPtr != nil {
+			_ = ippoolSvcGlobal.ReleaseAddressByVMID(req.VMID)
+		}
+		handlePveError(c, err)
 		return
 	}
 	vmLocation := "/api/pve/nodes/" + node + "/vms/" + fmt.Sprint(req.VMID)
-	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, vmLocation)
+	op, err := operationsSvcGlobal.CreateOperation(ctx, node, upid, vmLocation, vmidPtr, allocationIDPtr)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
@@ -415,4 +472,164 @@ func registerStorageRoutes(rg *gin.RouterGroup, svc *pve.StorageService) {
 func registerOperationsRoutes(rg *gin.RouterGroup, svc *operations.Service) {
 	operationsSvcGlobal = svc
 	rg.GET("/:id", getOperation)
+}
+
+// ─── IP 池路由 ─────────────────────────────────────────────
+
+type createIPPoolRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Gateway     string   `json:"gateway" binding:"required"`
+	Netmask     int      `json:"netmask" binding:"required"`
+	DNS1        string   `json:"dns1"`
+	DNS2        string   `json:"dns2"`
+	Description string   `json:"description"`
+	Nodes       []string `json:"nodes"`
+	Addresses   []string `json:"addresses"`
+}
+
+type updateIPPoolRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	DNS1        string   `json:"dns1"`
+	DNS2        string   `json:"dns2"`
+	Description string   `json:"description"`
+	Nodes       []string `json:"nodes"`
+}
+
+type manageAddressesRequest struct {
+	Addresses []string `json:"addresses" binding:"required"`
+}
+
+func listIPPools(c *gin.Context) {
+	pools, err := ippoolSvcGlobal.ListPools()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if pools == nil {
+		pools = []*ippool.Pool{}
+	}
+	respondOK(c, pools)
+}
+
+func createIPPool(c *gin.Context) {
+	var req createIPPoolRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
+		return
+	}
+	pool, err := ippoolSvcGlobal.CreatePool(req.Name, req.Gateway, req.Netmask, req.DNS1, req.DNS2, req.Description, req.Nodes, req.Addresses)
+	if err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	respondOK(c, pool)
+}
+
+func getIPPool(c *gin.Context) {
+	id := c.Param("id")
+	pool, err := ippoolSvcGlobal.GetPool(id)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if pool == nil {
+		respondError(c, http.StatusNotFound, "NotFound", "IP pool not found")
+		return
+	}
+	respondOK(c, pool)
+}
+
+func updateIPPool(c *gin.Context) {
+	id := c.Param("id")
+	var req updateIPPoolRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
+		return
+	}
+	pool, err := ippoolSvcGlobal.UpdatePool(id, req.Name, req.DNS1, req.DNS2, req.Description, req.Nodes)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if pool == nil {
+		respondError(c, http.StatusNotFound, "NotFound", "IP pool not found")
+		return
+	}
+	respondOK(c, pool)
+}
+
+func deleteIPPool(c *gin.Context) {
+	id := c.Param("id")
+	if err := ippoolSvcGlobal.DeletePool(id); err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func listIPPoolAddresses(c *gin.Context) {
+	id := c.Param("id")
+	status := c.Query("status")
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	size, err := strconv.Atoi(c.DefaultQuery("size", "50"))
+	if err != nil || size < 1 || size > 200 {
+		size = 50
+	}
+	addrs, total, err := ippoolSvcGlobal.ListAddresses(id, status, page, size)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if addrs == nil {
+		addrs = []ippool.Address{}
+	}
+	respondOK(c, gin.H{
+		"addresses": addrs,
+		"total":     total,
+		"page":      page,
+		"size":      size,
+	})
+}
+
+func addIPPoolAddresses(c *gin.Context) {
+	id := c.Param("id")
+	var req manageAddressesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
+		return
+	}
+	if err := ippoolSvcGlobal.InsertAddresses(id, req.Addresses); err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func deleteIPPoolAddresses(c *gin.Context) {
+	id := c.Param("id")
+	var req manageAddressesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "BadRequest", "invalid request body: "+err.Error())
+		return
+	}
+	if err := ippoolSvcGlobal.DeleteAddresses(id, req.Addresses); err != nil {
+		respondError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func registerIPPoolRoutes(rg *gin.RouterGroup, svc *ippool.Service) {
+	ippoolSvcGlobal = svc
+	rg.GET("", listIPPools)
+	rg.POST("", createIPPool)
+	rg.GET("/:id", getIPPool)
+	rg.PUT("/:id", updateIPPool)
+	rg.DELETE("/:id", deleteIPPool)
+	rg.GET("/:id/addresses", listIPPoolAddresses)
+	rg.POST("/:id/addresses", addIPPoolAddresses)
+	rg.DELETE("/:id/addresses", deleteIPPoolAddresses)
 }
