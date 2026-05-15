@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,7 @@ func (s *handlerStore) ListPendingEvents(limit int) ([]*operations.OutboxEvent, 
 }
 func (s *handlerStore) MarkEventPublished(id string) error                { return nil }
 func (s *handlerStore) MarkEventPublishFailed(id, lastError string) error { return nil }
+func (s *handlerStore) AcquireLock(ctx context.Context, name string, timeout int) (func(), error) { return func() {}, nil }
 
 func TestGetOperationReturnsOperationResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -1,7 +1,9 @@
 package operations
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -34,6 +36,7 @@ type Store interface {
 	ListPendingEvents(limit int) ([]*OutboxEvent, error)
 	MarkEventPublished(id string) error
 	MarkEventPublishFailed(id, lastError string) error
+	AcquireLock(ctx context.Context, name string, timeout int) (func(), error)
 }
 
 type mysqlStore struct {
@@ -348,6 +351,33 @@ func (s *mysqlStore) MarkEventPublished(id string) error {
 		now, now, id,
 	)
 	return err
+}
+
+// MarkEventPublishFailed 记录一次 outbox 事件发布失败。
+func (s *mysqlStore) AcquireLock(ctx context.Context, name string, timeout int) (func(), error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+	var result int
+	err = conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", name, timeout).Scan(&result)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if result != 1 {
+		conn.Close()
+		return nil, fmt.Errorf("another disk operation is in progress on this VM")
+	}
+	var released bool
+	return func() {
+		if released {
+			return
+		}
+		released = true
+		_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", name)
+		conn.Close()
+	}, nil
 }
 
 // MarkEventPublishFailed 记录一次 outbox 事件发布失败。

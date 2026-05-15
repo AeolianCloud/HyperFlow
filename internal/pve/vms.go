@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -77,6 +78,27 @@ func (s *VmsService) GetTaskStatus(ctx context.Context, node, upid string) (stri
 	return result.Status, result.ExitStatus, nil
 }
 
+// DataDiskSpec 数据盘规格
+type DataDiskSpec struct {
+	Size    int    `json:"size" example:"100"`              // 数据盘大小，单位 GB（必填）
+	Storage string `json:"storage" example:"local-lvm"`     // 数据盘存储池（必填）
+}
+
+// VmDisk 表示 VM 的一块磁盘
+type VmDisk struct {
+	DiskId  string `json:"diskId" example:"scsi1"`         // 接口名
+	Size    int64  `json:"size" example:"100"`              // 大小 GB
+	Storage string `json:"storage" example:"local-lvm"`     // 存储池
+	Format  string `json:"format,omitempty" example:"qcow2"`
+	Interface string `json:"interface" example:"scsi"`      // 总线类型
+}
+
+// AttachDiskRequest 挂载数据盘请求参数
+type AttachDiskRequest struct {
+	Size    int    `json:"size" binding:"required" example:"100"`              // 数据盘大小，单位 GB（必填）
+	Storage string `json:"storage" binding:"required" example:"local-lvm"`     // 目标存储池（必填）
+}
+
 // CreateVmRequest 新建虚拟机请求参数
 type CreateVmRequest struct {
 	VMID          int    `json:"vmid" example:"200"`                                                  // 新虚拟机 VMID（必填）
@@ -88,6 +110,7 @@ type CreateVmRequest struct {
 	DiskFormat    string `json:"diskFormat,omitempty" example:"qcow2"`                                // 源磁盘格式，如 qcow2/raw（可选）
 	Storage       string `json:"storage" example:"local-lvm"`                                         // 目标存储池（必填）
 	Network       string `json:"network,omitempty" example:"virtio,bridge=vmbr0"`                     // 网络设备配置，格式同 PVE net0，默认 virtio,bridge=vmbr0（可选）
+	DataDisks     []DataDiskSpec `json:"dataDisks,omitempty"`                                         // 可选的数据盘列表
 	// IP 池配置（可选，使用 IP 池时自动分配地址并填充 CloudInit 参数）
 	IPPoolID    string `json:"ipPoolId,omitempty" example:"pool-abc123"`               // IP 池 ID（可选）
 	IPAddress   string `json:"ipAddress,omitempty" example:"10.0.0.10"`                // 指定分配的 IP 地址（可选，不指定时随机分配）
@@ -130,6 +153,14 @@ func (s *VmsService) CreateVm(ctx context.Context, node string, req CreateVmRequ
 		"machine": "q35",
 		"scsihw":  "virtio-scsi-single",
 		iface:     diskVal,
+	}
+	// 处理可选的数据盘
+	nextIdx := NextSCSIIndex(body)
+	for _, dd := range req.DataDisks {
+		diskKey := fmt.Sprintf("scsi%d", nextIdx)
+		diskVal := fmt.Sprintf("%s:%d", dd.Storage, dd.Size)
+		body[diskKey] = diskVal
+		nextIdx++
 	}
 	net := req.Network
 	if net == "" {
@@ -234,6 +265,92 @@ func buildCloudInitUserData(name string, packages []string, ciUser, ciPassword, 
 		sb.WriteString("ssh_pwauth: true\n")
 	}
 	return sb.String()
+}
+
+// NextSCSIIndex 从已有 map key 中找到下一个可用的 scsi 索引（填充空洞）。
+func NextSCSIIndex(body map[string]any) int {
+	used := make(map[int]bool)
+	for k := range body {
+		var idx int
+		if n, _ := fmt.Sscanf(k, "scsi%d", &idx); n == 1 {
+			used[idx] = true
+		}
+	}
+	idx := 0
+	for used[idx] {
+		idx++
+	}
+	return idx
+}
+
+// ParseSCSIDisks 从 VM config 中解析所有 scsiN 磁盘，按索引升序返回 VmDisk 列表。
+func ParseSCSIDisks(config map[string]any) []VmDisk {
+	var disks []VmDisk
+	for k, v := range config {
+		var idx int
+		if n, _ := fmt.Sscanf(k, "scsi%d", &idx); n == 1 {
+			val, _ := v.(string)
+			disks = append(disks, parseDiskValue(k, val, "scsi"))
+		}
+	}
+	sort.Slice(disks, func(i, j int) bool {
+		var a, b int
+		fmt.Sscanf(disks[i].DiskId, "scsi%d", &a)
+		fmt.Sscanf(disks[j].DiskId, "scsi%d", &b)
+		return a < b
+	})
+	return disks
+}
+
+// parseDiskValue 解析 PVE 磁盘值字符串，如 "local-lvm:100,format=qcow2"
+func parseDiskValue(diskId, val, iface string) VmDisk {
+	d := VmDisk{DiskId: diskId, Interface: iface}
+	if val == "" {
+		return d
+	}
+	// 格式: storage:size[,key=val...]
+	parts := strings.SplitN(val, ",", 2)
+	storageSize := parts[0]
+	if len(parts) > 1 {
+		for _, opt := range strings.Split(parts[1], ",") {
+			if kv := strings.SplitN(opt, "=", 2); len(kv) == 2 && kv[0] == "format" {
+				d.Format = kv[1]
+			}
+		}
+	}
+	ss := strings.SplitN(storageSize, ":", 2)
+	if len(ss) == 2 {
+		d.Storage = ss[0]
+		fmt.Sscanf(ss[1], "%d", &d.Size)
+	}
+	return d
+}
+
+// GetVmConfig 读取 VM 当前配置。
+func (s *VmsService) GetVmConfig(ctx context.Context, node, vmid string) (json.RawMessage, error) {
+	return s.client.Get(ctx, "/nodes/"+node+"/qemu/"+vmid+"/config")
+}
+
+// UpdateVmConfig 更新 VM 配置（追加参数，非全量替换），返回 PVE 响应（可能包含 UPID）。
+func (s *VmsService) UpdateVmConfig(ctx context.Context, node, vmid string, config map[string]any) (json.RawMessage, error) {
+	bodyBytes, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.PostWithBody(ctx, "/nodes/"+node+"/qemu/"+vmid+"/config", bytes.NewReader(bodyBytes))
+}
+
+// UnlinkDisk 从 VM 卸载磁盘。purge=true 时同时销毁存储卷。
+func (s *VmsService) UnlinkDisk(ctx context.Context, node, vmid, diskId string, purge bool) (json.RawMessage, error) {
+	body := map[string]any{"id": diskId}
+	if purge {
+		body["purge"] = 1
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.PostWithBody(ctx, "/nodes/"+node+"/qemu/"+vmid+"/unlink", bytes.NewReader(bodyBytes))
 }
 
 // UploadSnippet 通过 WebDAV PUT 将 cloud-init user-data 文件上传至 snippets 目录。

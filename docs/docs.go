@@ -143,7 +143,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。\n支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；\n当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。\nciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。\n成功后响应 Operation-Location 及 Location 头。",
+                "description": "通过 PVE 创建新虚拟机，并在创建时通过 import-from 导入指定磁盘卷。\n支持可选的 CloudInit 配置（ciUser、ciPassword、sshKeys、ipConfig0、nameserver、searchDomain）；\n当请求体包含任意 CloudInit 字段时，系统自动附加 CloudInit 驱动盘（ide2）及对应配置。\nciPackages 非空时在 snippetsStorage 中生成 cloud-init user-data Snippet（自动执行 package_update/upgrade，并将 ciUser、ciPassword、sshKeys 写入 user-data）并通过 cicustom 引用（snippetsStorage 此时必填）。\n支持可选的数据盘配置 dataDisks，每块数据盘需指定 size（GB）和 storage（存储池名称），自动分配 scsi 接口名。\n成功后响应 Operation-Location 及 Location 头。",
                 "consumes": [
                     "application/json"
                 ],
@@ -296,6 +296,218 @@ const docTemplate = `{
                         "name": "vmid",
                         "in": "path",
                         "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "headers": {
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/nodes/{node}/vms/{vmid}/disks": {
+            "get": {
+                "description": "返回指定虚拟机的所有磁盘列表",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "列出虚拟机磁盘",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "节点名称",
+                        "name": "node",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "虚拟机 ID",
+                        "name": "vmid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/pve.VmDisk"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "给指定虚拟机挂载一块新的空数据盘，支持热插拔。自动分配下一个可用的 scsi 接口名。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "挂载数据盘",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "节点名称",
+                        "name": "node",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "虚拟机 ID",
+                        "name": "vmid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "挂载参数（size 和 storage 为必填）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/pve.AttachDiskRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "headers": {
+                            "Operation-Location": {
+                                "type": "string",
+                                "description": "/api/pve/operations/{id}"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/nodes/{node}/vms/{vmid}/disks/{diskId}": {
+            "delete": {
+                "description": "从虚拟机卸载指定数据盘。不带 purge 参数时仅从配置移除，保留存储卷；带 ?purge=true 时同时销毁存储卷。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "卸载/删除数据盘",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "节点名称",
+                        "name": "node",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "虚拟机 ID",
+                        "name": "vmid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "磁盘接口名，如 scsi1",
+                        "name": "diskId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否同时销毁存储卷",
+                        "name": "purge",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -587,6 +799,25 @@ const docTemplate = `{
                 }
             }
         },
+        "pve.AttachDiskRequest": {
+            "type": "object",
+            "required": [
+                "size",
+                "storage"
+            ],
+            "properties": {
+                "size": {
+                    "description": "数据盘大小，单位 GB（必填）",
+                    "type": "integer",
+                    "example": 100
+                },
+                "storage": {
+                    "description": "目标存储池（必填）",
+                    "type": "string",
+                    "example": "local-lvm"
+                }
+            }
+        },
         "pve.CreateVmRequest": {
             "type": "object",
             "properties": {
@@ -624,6 +855,13 @@ const docTemplate = `{
                     "description": "CPU 核数（必填）",
                     "type": "integer",
                     "example": 2
+                },
+                "dataDisks": {
+                    "description": "可选的数据盘列表",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pve.DataDiskSpec"
+                    }
                 },
                 "diskFormat": {
                     "description": "源磁盘格式，如 qcow2/raw（可选）",
@@ -702,6 +940,21 @@ const docTemplate = `{
                 }
             }
         },
+        "pve.DataDiskSpec": {
+            "type": "object",
+            "properties": {
+                "size": {
+                    "description": "数据盘大小，单位 GB（必填）",
+                    "type": "integer",
+                    "example": 100
+                },
+                "storage": {
+                    "description": "数据盘存储池（必填）",
+                    "type": "string",
+                    "example": "local-lvm"
+                }
+            }
+        },
         "pve.VM": {
             "type": "object",
             "properties": {
@@ -722,6 +975,35 @@ const docTemplate = `{
                 },
                 "vmid": {
                     "type": "integer"
+                }
+            }
+        },
+        "pve.VmDisk": {
+            "type": "object",
+            "properties": {
+                "diskId": {
+                    "description": "接口名",
+                    "type": "string",
+                    "example": "scsi1"
+                },
+                "format": {
+                    "type": "string",
+                    "example": "qcow2"
+                },
+                "interface": {
+                    "description": "总线类型",
+                    "type": "string",
+                    "example": "scsi"
+                },
+                "size": {
+                    "description": "大小 GB",
+                    "type": "integer",
+                    "example": 100
+                },
+                "storage": {
+                    "description": "存储池",
+                    "type": "string",
+                    "example": "local-lvm"
                 }
             }
         }
